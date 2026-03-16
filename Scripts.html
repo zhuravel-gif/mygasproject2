@@ -41,14 +41,226 @@ function setStatus(id, msg, type) {
 }
 
 // ============================================================
-// TAB 1: ЭКСПОРТ
+// TAB 1: ЭКСПОРТ / ИМПОРТ 1С
 // ============================================================
-function doExport() {
+var IMPORT_STATE = {
+  mode: null,          // 'nomenclature' | 'cost1c' | 'supplier'
+  rawData: null,       // исходные данные из файла [ [..], .. ]
+  headers: null,       // заголовки файла
+  mapping: null        // объект сопоставления
+};
+
+var NOMENCLATURE_TARGETS = [
+  'Номенклатура',
+  'Артикул',
+  'Артикул ВБ',
+  'Категория товаров',
+  'Объем тары',
+  'Товарная группа 2',
+  'Товарная группа 3',
+  'Основное сырье',
+  'Тара (флакон)',
+  'Кол-во лаков в наборе',
+  'Артикул МП',
+  'Это набор',
+  'Вес',
+  'Товарная группа 1'
+];
+
+function openFileAndParse(callback) {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,.txt';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var text = ev.target.result || '';
+        var data = parseCsv(text);
+        if (!data || data.length < 2) {
+          setStatus('export-status', 'Файл пустой или содержит только заголовок', 'error');
+          return;
+        }
+        callback(data);
+      } catch (err) {
+        setStatus('export-status', 'Ошибка чтения файла: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+  input.click();
+}
+
+function parseCsv(text) {
+  var rows = [];
+  var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(function(l) { return l.trim() !== ''; });
+  if (!lines.length) return [];
+  // Определяем разделитель по первой строке
+  var first = lines[0];
+  var delim = first.indexOf(';') >= 0 ? ';' : ',';
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var parts = [];
+    var current = '';
+    var inQuotes = false;
+    for (var j = 0; j < line.length; j++) {
+      var ch = line[j];
+      if (ch === '"') {
+        if (inQuotes && line[j + 1] === '"') {
+          current += '"';
+          j++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === delim && !inQuotes) {
+        parts.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    parts.push(current);
+    rows.push(parts);
+  }
+  return rows;
+}
+
+function openNomenclatureImport() {
+  IMPORT_STATE.mode = 'nomenclature';
+  openFileAndParse(function(data) {
+    IMPORT_STATE.rawData = data;
+    IMPORT_STATE.headers = data[0];
+    buildNomenclatureMappingUI();
+  });
+}
+
+function buildNomenclatureMappingUI() {
+  var modal = document.getElementById('mapping-modal');
+  document.getElementById('mapping-title').textContent = 'Сопоставление столбцов номенклатуры';
+  document.getElementById('mapping-hint').textContent = 'Выберите, какие столбцы файла соответствуют полям 1cData.';
+  var body = document.getElementById('mapping-body');
+  body.innerHTML = '';
+
+  var headers = IMPORT_STATE.headers || [];
+  var html = '<table class="data-table"><thead><tr><th>Поле 1cData</th><th>Столбец файла</th></tr></thead><tbody>';
+  for (var i = 0; i < NOMENCLATURE_TARGETS.length; i++) {
+    html += '<tr><td>' + esc(NOMENCLATURE_TARGETS[i]) + '</td><td>';
+    html += '<select data-target="' + i + '"><option value="">— Не заполнять —</option>';
+    for (var h = 0; h < headers.length; h++) {
+      var sel = '';
+      if (String(headers[h]).trim().toLowerCase() === NOMENCLATURE_TARGETS[i].toLowerCase()) sel = ' selected';
+      html += '<option value="' + h + '"' + sel + '>' + esc(headers[h]) + '</option>';
+    }
+    html += '</select></td></tr>';
+  }
+  html += '</tbody></table>';
+  body.innerHTML = html;
+
+  IMPORT_STATE.mapping = null;
+  document.getElementById('mapping-status').textContent = '';
+  modal.classList.remove('hidden');
+}
+
+function openCostImport() {
+  IMPORT_STATE.mode = 'cost1c';
+  openFileAndParse(function(data) {
+    IMPORT_STATE.rawData = data;
+    IMPORT_STATE.headers = data[0];
+    buildSimpleMappingUI('Себестоимость 1С', 'Выберите колонки номенклатуры и себестоимости 1С.');
+  });
+}
+
+function openSupplierPriceImport() {
+  IMPORT_STATE.mode = 'supplier';
+  openFileAndParse(function(data) {
+    IMPORT_STATE.rawData = data;
+    IMPORT_STATE.headers = data[0];
+    buildSimpleMappingUI('Цена поставщика', 'Выберите колонки номенклатуры и цены поставщика.');
+  });
+}
+
+function buildSimpleMappingUI(valueLabel, hint) {
+  var modal = document.getElementById('mapping-modal');
+  document.getElementById('mapping-title').textContent = valueLabel;
+  document.getElementById('mapping-hint').textContent = hint;
+  var body = document.getElementById('mapping-body');
+  body.innerHTML = '';
+
+  var headers = IMPORT_STATE.headers || [];
+  var options = '<option value="">— Выберите —</option>';
+  for (var h = 0; h < headers.length; h++) {
+    options += '<option value="' + h + '">' + esc(headers[h]) + '</option>';
+  }
+
+  body.innerHTML =
+    '<div class="params-grid">' +
+      '<div class="param-group">' +
+        '<label>Колонка номенклатуры</label>' +
+        '<select id="map-name-col">' + options + '</select>' +
+      '</div>' +
+      '<div class="param-group">' +
+        '<label>Колонка значения</label>' +
+        '<select id="map-value-col">' + options + '</select>' +
+      '</div>' +
+    '</div>';
+
+  IMPORT_STATE.mapping = null;
+  document.getElementById('mapping-status').textContent = '';
+  modal.classList.remove('hidden');
+}
+
+function closeMapping() {
+  var modal = document.getElementById('mapping-modal');
+  modal.classList.add('hidden');
+}
+
+function confirmMapping() {
+  if (!IMPORT_STATE.rawData || !IMPORT_STATE.headers) return;
+  if (IMPORT_STATE.mode === 'nomenclature') {
+    applyNomenclatureImport();
+  } else if (IMPORT_STATE.mode === 'cost1c') {
+    applyCostImport();
+  } else if (IMPORT_STATE.mode === 'supplier') {
+    applySupplierImport();
+  }
+}
+
+function applyNomenclatureImport() {
+  var selects = document.querySelectorAll('#mapping-body select[data-target]');
+  var map = {};
+  selects.forEach(function(sel) {
+    var t = parseInt(sel.getAttribute('data-target'), 10);
+    var v = sel.value === '' ? null : parseInt(sel.value, 10);
+    map[t] = v;
+  });
+  IMPORT_STATE.mapping = map;
+
+  var raw = IMPORT_STATE.rawData;
+  var mapped = [];
+  // первая строка — целевые заголовки
+  mapped.push(NOMENCLATURE_TARGETS.slice());
+
+  for (var r = 1; r < raw.length; r++) {
+    var srcRow = raw[r];
+    var row = [];
+    for (var i = 0; i < NOMENCLATURE_TARGETS.length; i++) {
+      var srcIdx = map[i];
+      row.push(srcIdx != null ? (srcRow[srcIdx] || '') : '');
+    }
+    mapped.push(row);
+  }
+
+  var nds = parseFloat(document.getElementById('import-nds').value) || 0.22;
+  var tax = parseFloat(document.getElementById('import-tax').value) || 0.065;
+
   showLoading();
-  setStatus('export-status', 'Экспортируем данные...', 'info');
+  setStatus('export-status', 'Импорт номенклатуры...', 'info');
   google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
+      closeMapping();
       if (res.success) {
         setStatus('export-status', res.message, 'success');
         loadExportData();
@@ -58,9 +270,83 @@ function doExport() {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('export-status', 'Ошибка: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка импорта: ' + err.message, 'error');
     })
-    .exportToDataSheet();
+    .importNomenclature(mapped, nds, tax);
+}
+
+function applyCostImport() {
+  var nameCol = document.getElementById('map-name-col').value;
+  var valueCol = document.getElementById('map-value-col').value;
+  if (nameCol === '' || valueCol === '') {
+    document.getElementById('mapping-status').textContent = 'Заполните оба сопоставления.';
+    document.getElementById('mapping-status').className = 'status error';
+    return;
+  }
+  nameCol = parseInt(nameCol, 10);
+  valueCol = parseInt(valueCol, 10);
+
+  var raw = IMPORT_STATE.rawData;
+  var mapped = [];
+  for (var r = 1; r < raw.length; r++) {
+    var srcRow = raw[r];
+    var name = String(srcRow[nameCol] || '').trim();
+    var val = parseFloat(srcRow[valueCol]) || 0;
+    if (!name) continue;
+    mapped.push({ name: name, value: val });
+  }
+
+  showLoading();
+  setStatus('export-status', 'Импорт себестоимости 1С...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      closeMapping();
+      setStatus('export-status', res.message, res.success ? 'success' : 'error');
+      if (res.success) loadExportData();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка импорта: ' + err.message, 'error');
+    })
+    .importCost1C(mapped);
+}
+
+function applySupplierImport() {
+  var nameCol = document.getElementById('map-name-col').value;
+  var valueCol = document.getElementById('map-value-col').value;
+  if (nameCol === '' || valueCol === '') {
+    document.getElementById('mapping-status').textContent = 'Заполните оба сопоставления.';
+    document.getElementById('mapping-status').className = 'status error';
+    return;
+  }
+  nameCol = parseInt(nameCol, 10);
+  valueCol = parseInt(valueCol, 10);
+
+  var raw = IMPORT_STATE.rawData;
+  var mapped = [];
+  for (var r = 1; r < raw.length; r++) {
+    var srcRow = raw[r];
+    var name = String(srcRow[nameCol] || '').trim();
+    var val = parseFloat(srcRow[valueCol]) || 0;
+    if (!name) continue;
+    mapped.push({ name: name, value: val });
+  }
+
+  showLoading();
+  setStatus('export-status', 'Импорт цен поставщика...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      closeMapping();
+      setStatus('export-status', res.message, res.success ? 'success' : 'error');
+      if (res.success) loadExportData();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка импорта: ' + err.message, 'error');
+    })
+    .importSupplierPrice(mapped);
 }
 
 function loadExportData() {
@@ -86,12 +372,29 @@ function renderExportTable(data) {
   thead.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Заголовки
+  // Определяем индексы колонок НДС/Пошлина по заголовкам
+  var ndsIdx = -1;
+  var taxIdx = -1;
+
+  // Заголовки (скрываем "Цена за 5 л" и "Цена за 10 л и более")
+  var visibleIndexes = [];
   for (var h = 0; h < data.headers.length; h++) {
+    var header = String(data.headers[h] || '');
+    if (header.indexOf('Цена за 5') >= 0 || header.indexOf('Цена за 10') >= 0) {
+      continue;
+    }
+    if (header === 'НДС') ndsIdx = h;
+    if (header === 'Пошлина') taxIdx = h;
+    visibleIndexes.push(h);
     var th = document.createElement('th');
-    th.textContent = data.headers[h];
+    th.textContent = header;
     thead.appendChild(th);
   }
+
+  STATE.exportDataVisibleIndexes = visibleIndexes;
+  STATE.exportDataNdsIdx = ndsIdx;
+  STATE.exportDataTaxIdx = taxIdx;
+  STATE.exportNdsEdits = {};
 
   // Строки
   renderExportRows(data.rows);
@@ -102,19 +405,75 @@ function renderExportRows(rows) {
   tbody.innerHTML = '';
   for (var i = 0; i < rows.length; i++) {
     var tr = document.createElement('tr');
-    for (var j = 0; j < rows[i].length; j++) {
+    for (var vi = 0; vi < (STATE.exportDataVisibleIndexes || []).length; vi++) {
+      var j = STATE.exportDataVisibleIndexes[vi];
       var td = document.createElement('td');
       var val = rows[i][j];
-      if (typeof val === 'number') {
-        td.className = 'num';
-        td.textContent = val % 1 === 0 ? val : val.toFixed(2);
+      if (j === STATE.exportDataNdsIdx || j === STATE.exportDataTaxIdx) {
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.step = j === STATE.exportDataNdsIdx ? '0.01' : '0.001';
+        input.value = (typeof val === 'number') ? val : (val || '');
+        input.setAttribute('data-row', i);
+        input.setAttribute('data-type', j === STATE.exportDataNdsIdx ? 'nds' : 'tax');
+        input.oninput = function(e) {
+          var rowIdx = parseInt(e.target.getAttribute('data-row'), 10);
+          var type = e.target.getAttribute('data-type');
+          STATE.exportNdsEdits[rowIdx] = STATE.exportNdsEdits[rowIdx] || {};
+          STATE.exportNdsEdits[rowIdx][type] = parseFloat(e.target.value);
+        };
+        td.appendChild(input);
       } else {
-        td.textContent = val || '';
+        if (typeof val === 'number') {
+          td.className = 'num';
+          td.textContent = val % 1 === 0 ? val : val.toFixed(2);
+        } else {
+          td.textContent = val || '';
+        }
       }
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
   }
+}
+
+function saveNdsTaxChanges() {
+  if (!STATE.exportNdsEdits || Object.keys(STATE.exportNdsEdits).length === 0) {
+    setStatus('export-status', 'Нет изменений НДС/Пошлины для сохранения', 'info');
+    return;
+  }
+  var updates = [];
+  Object.keys(STATE.exportNdsEdits).forEach(function(rowKey) {
+    var idx = parseInt(rowKey, 10);
+    var u = STATE.exportNdsEdits[rowKey];
+    var one = { row: idx };
+    if (u.nds !== undefined && !isNaN(u.nds)) one.nds = u.nds;
+    if (u.tax !== undefined && !isNaN(u.tax)) one.tax = u.tax;
+    updates.push(one);
+  });
+  if (!updates.length) {
+    setStatus('export-status', 'Нет валидных изменений НДС/Пошлины', 'info');
+    return;
+  }
+
+  showLoading();
+  setStatus('export-status', 'Сохраняем НДС/Пошлину...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (res && res.success) {
+        setStatus('export-status', 'НДС и Пошлина обновлены', 'success');
+        STATE.exportNdsEdits = {};
+        loadExportData();
+      } else {
+        setStatus('export-status', 'Не удалось обновить НДС/Пошлину', 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка обновления НДС/Пошлины: ' + err.message, 'error');
+    })
+    .updateNdsTax(updates);
 }
 
 function filterExportTable() {

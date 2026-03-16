@@ -9,7 +9,7 @@
 <nav class="navbar">
   <div class="nav-brand">Калькулятор себестоимости</div>
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showTab('export')">Экспорт данных</button>
+    <button class="nav-tab active" onclick="showTab('export')">Экспорт / импорт 1С</button>
     <button class="nav-tab" onclick="showTab('params')">Параметры</button>
     <button class="nav-tab" onclick="showTab('flakons')">Флаконы</button>
     <button class="nav-tab" onclick="showTab('cost')">Себестоимость</button>
@@ -22,14 +22,29 @@
 
 <main class="container">
 
-  <!-- ==================== TAB 1: ЭКСПОРТ ==================== -->
+  <!-- ==================== TAB 1: ЭКСПОРТ / ИМПОРТ ==================== -->
   <div id="tab-export" class="tab-content active">
     <div class="card">
-      <h2>Экспорт данных из Calc в 1cData</h2>
-      <p class="hint">Копирует столбцы A-N из листа Calc + маппинг данных из 1С и поставщика на лист 1cData.</p>
+      <h2>Импорт данных 1С в 1cData</h2>
+      <p class="hint">Сначала загрузите базовую номенклатуру, затем отдельными файлами загрузите себестоимость 1С и цены поставщиков.</p>
       <div class="actions">
-        <button class="btn btn-primary" onclick="doExport()">Импорт из Calc</button>
+        <button class="btn btn-primary" onclick="openNomenclatureImport()">Импорт номенклатуры 1С</button>
+        <button class="btn btn-secondary" onclick="openCostImport()">Импорт себестоимости 1С</button>
+        <button class="btn btn-secondary" onclick="openSupplierPriceImport()">Импорт цены поставщика</button>
+      </div>
+      <div class="params-grid" style="margin-top:12px">
+        <div class="param-group">
+          <label>НДС по умолчанию</label>
+          <input type="number" id="import-nds" step="0.01" value="0.22">
+        </div>
+        <div class="param-group">
+          <label>Пошлина по умолчанию</label>
+          <input type="number" id="import-tax" step="0.001" value="0.065">
+        </div>
+      </div>
+      <div class="actions">
         <button class="btn btn-secondary" onclick="loadExportData()">Обновить таблицу</button>
+        <button class="btn btn-outline" onclick="saveNdsTaxChanges()">Сохранить изменения НДС/Пошлины</button>
         <button class="btn btn-outline" onclick="exportCSV()">Экспорт в CSV</button>
       </div>
       <div id="export-status" class="status"></div>
@@ -234,6 +249,20 @@
     </div>
     <div class="card" id="verify-output">
       <p class="hint">Выберите позицию выше</p>
+    </div>
+  </div>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО МАППИНГА ФАЙЛА ==================== -->
+  <div id="mapping-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="mapping-title">Сопоставление столбцов</h3>
+      <p class="hint" id="mapping-hint"></p>
+      <div id="mapping-body"></div>
+      <div class="actions" style="margin-top:16px">
+        <button class="btn btn-primary" onclick="confirmMapping()">Импортировать</button>
+        <button class="btn btn-outline" onclick="closeMapping()">Отмена</button>
+      </div>
+      <div id="mapping-status" class="status"></div>
     </div>
   </div>
 
