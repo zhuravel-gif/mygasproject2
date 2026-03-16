@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Styles') ?>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-brand">Калькулятор себестоимости</div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showTab('export')">Экспорт данных</button>
+    <button class="nav-tab" onclick="showTab('params')">Параметры</button>
+    <button class="nav-tab" onclick="showTab('flakons')">Флаконы</button>
+    <button class="nav-tab" onclick="showTab('cost')">Себестоимость</button>
+    <button class="nav-tab" onclick="showTab('calc')">Калькулятор</button>
+    <button class="nav-tab" onclick="showTab('verify')">Проверка</button>
+  </div>
+</nav>
+
+<div id="loading" class="loading-overlay"><div class="spinner"></div><p>Загрузка...</p></div>
+
+<main class="container">
+
+  <!-- ==================== TAB 1: ЭКСПОРТ ==================== -->
+  <div id="tab-export" class="tab-content active">
+    <div class="card">
+      <h2>Экспорт данных из Calc в 1cData</h2>
+      <p class="hint">Копирует столбцы A-N из листа Calc + маппинг данных из 1С и поставщика на лист 1cData.</p>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="doExport()">Импорт из Calc</button>
+        <button class="btn btn-secondary" onclick="loadExportData()">Обновить таблицу</button>
+        <button class="btn btn-outline" onclick="exportCSV()">Экспорт в CSV</button>
+      </div>
+      <div id="export-status" class="status"></div>
+      <div id="export-stats" class="stats-bar"></div>
+    </div>
+    <div class="card">
+      <input type="text" id="export-search" class="search-input" placeholder="Поиск по наименованию..." oninput="filterExportTable()">
+      <div class="table-wrap">
+        <table id="export-table" class="data-table">
+          <thead><tr id="export-thead"></tr></thead>
+          <tbody id="export-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 2: ПАРАМЕТРЫ ==================== -->
+  <div id="tab-params" class="tab-content">
+    <div class="card">
+      <h2>Параметры расчёта</h2>
+      <p class="hint">Настройка курсов, логистики и модели расчёта. Параметры сохраняются на листе basis.</p>
+      <div class="params-grid">
+        <div class="param-group">
+          <label>Курс USD</label>
+          <input type="number" id="p-usd" step="0.1" value="92">
+        </div>
+        <div class="param-group">
+          <label>Курс RMB</label>
+          <input type="number" id="p-rmb" step="0.1" value="12.8">
+        </div>
+        <div class="param-group">
+          <label>Логистика ($/кг)</label>
+          <input type="number" id="p-log" step="0.1" value="4.5">
+        </div>
+        <div class="param-group">
+          <label>Комиссия (множитель)</label>
+          <input type="number" id="p-com" step="0.01" value="1.05">
+        </div>
+        <div class="param-group">
+          <label>Колонка Цены</label>
+          <select id="p-priceCol">
+            <option value="Q" selected>Q — Цена поставщика</option>
+            <option value="R">R — Цена за 5 л</option>
+            <option value="S">S — Цена за 10 л и более</option>
+          </select>
+        </div>
+        <div class="param-group">
+          <label>Ставка НДС</label>
+          <input type="number" id="p-ndsRate" step="0.01" value="0.22">
+        </div>
+        <div class="param-group">
+          <label>Ставка Пошлины</label>
+          <input type="number" id="p-taxRate" step="0.001" value="0.065">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="saveParamsUI()">Сохранить параметры</button>
+        <button class="btn btn-secondary" onclick="loadParamsUI()">Загрузить сохранённые</button>
+      </div>
+      <div id="params-status" class="status"></div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 3: ФЛАКОНЫ ==================== -->
+  <div id="tab-flakons" class="tab-content">
+    <div class="card">
+      <h2>Себестоимость флаконов и этикетки</h2>
+      <p class="hint">Данные о стоимости тары. Заполните цены флаконов, НДС, доставку и этикетку.</p>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="saveFlakonDataUI()">Сохранить</button>
+        <button class="btn btn-secondary" onclick="loadFlakonsUI()">Обновить</button>
+      </div>
+      <div id="flakons-status" class="status"></div>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table class="data-table editable">
+          <thead>
+            <tr>
+              <th>Флакон</th>
+              <th>Объём</th>
+              <th>Цена</th>
+              <th>НДС</th>
+              <th>Доставка</th>
+              <th>Этикетка</th>
+            </tr>
+          </thead>
+          <tbody id="flakons-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 4: СЕБЕСТОИМОСТЬ ==================== -->
+  <div id="tab-cost" class="tab-content">
+    <div class="card">
+      <h2>Себестоимость позиций</h2>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="runCalculation()">Рассчитать</button>
+        <button class="btn btn-outline" onclick="saveResultsUI()">Записать результаты на лист</button>
+      </div>
+      <div id="cost-status" class="status"></div>
+      <div id="cost-stats" class="stats-bar"></div>
+    </div>
+    <div class="card">
+      <div class="filter-row">
+        <input type="text" id="cost-search" class="search-input" placeholder="Поиск..." oninput="filterCostTable()">
+        <select id="cost-type-filter" onchange="filterCostTable()">
+          <option value="">Все типы</option>
+          <option value="Сырьё">Сырьё</option>
+          <option value="Готовый товар">Готовый товар</option>
+          <option value="Наборы">Наборы</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Номенклатура</th>
+              <th>Тип</th>
+              <th>Сырьё</th>
+              <th>Нал+Пош</th>
+              <th>Доставка</th>
+              <th>Флакон</th>
+              <th>Нал.Фл</th>
+              <th>Дост.Фл</th>
+              <th>Этикетка</th>
+              <th class="col-total">ИТОГО</th>
+              <th>Себес 1С</th>
+              <th>Разница</th>
+              <th>%</th>
+            </tr>
+          </thead>
+          <tbody id="cost-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 5: КАЛЬКУЛЯТОР ==================== -->
+  <div id="tab-calc" class="tab-content">
+    <div class="card">
+      <h2>Ручной калькулятор</h2>
+      <p class="hint">Выберите существующую позицию или введите значения вручную.</p>
+      <div class="calc-layout">
+        <div class="calc-inputs">
+          <div class="param-group">
+            <label>Позиция из данных</label>
+            <select id="calc-select" onchange="onCalcSelect()">
+              <option value="">— Ручной ввод —</option>
+            </select>
+          </div>
+          <div class="param-group">
+            <label>Тип товара</label>
+            <select id="calc-type" onchange="calcManual()">
+              <option value="Сырьё">Сырьё</option>
+              <option value="Готовый товар">Готовый товар</option>
+              <option value="Наборы">Наборы</option>
+            </select>
+          </div>
+          <div class="param-group">
+            <label>Цена</label>
+            <input type="number" id="calc-price" step="0.01" value="0" oninput="calcManual()">
+          </div>
+          <div class="param-group">
+            <label>Объём тары (г)</label>
+            <input type="number" id="calc-vol" step="1" value="0" oninput="calcManual()">
+          </div>
+          <div class="param-group">
+            <label>Вес (кг)</label>
+            <input type="number" id="calc-weight" step="0.01" value="0" oninput="calcManual()">
+          </div>
+          <div class="param-group">
+            <label>Флакон</label>
+            <select id="calc-flakon" onchange="calcManual()">
+              <option value="">— Нет —</option>
+            </select>
+          </div>
+          <div class="param-group">
+            <label>Себестоимость 1С</label>
+            <input type="number" id="calc-cost1c" step="0.01" value="0" oninput="calcManual()">
+          </div>
+        </div>
+        <div class="calc-result" id="calc-result">
+          <p class="hint">Заполните поля для расчёта</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 6: ПРОВЕРКА ==================== -->
+  <div id="tab-verify" class="tab-content">
+    <div class="card">
+      <h2>Проверка расчёта</h2>
+      <p class="hint">Выберите позицию для детального просмотра формул с подстановкой значений.</p>
+      <div class="param-group">
+        <label>Позиция</label>
+        <select id="verify-select" onchange="runVerification()">
+          <option value="">— Выберите позицию —</option>
+        </select>
+      </div>
+    </div>
+    <div class="card" id="verify-output">
+      <p class="hint">Выберите позицию выше</p>
+    </div>
+  </div>
+
+</main>
+
+<?!= include('Scripts') ?>
+
+</body>
+</html>

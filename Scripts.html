@@ -1,0 +1,560 @@
+<script>
+// ============================================================
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+// ============================================================
+var STATE = {
+  exportData: null,    // { headers, rows }
+  calcResults: null,   // массив результатов
+  flakons: [],         // массив флаконов
+  params: null         // текущие параметры
+};
+
+// ============================================================
+// НАВИГАЦИЯ
+// ============================================================
+function showTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.nav-tab').forEach(function(el) { el.classList.remove('active'); });
+  document.getElementById('tab-' + tabId).classList.add('active');
+  // Найти кнопку и сделать активной
+  var tabs = document.querySelectorAll('.nav-tab');
+  var names = ['export','params','flakons','cost','calc','verify'];
+  for (var i = 0; i < names.length; i++) {
+    if (names[i] === tabId) tabs[i].classList.add('active');
+  }
+  // Подгрузить данные при первом открытии
+  if (tabId === 'params' && !STATE.params) loadParamsUI();
+  if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
+  if (tabId === 'calc') populateCalcSelects();
+  if (tabId === 'verify') populateVerifySelect();
+}
+
+// ============================================================
+// LOADING
+// ============================================================
+function showLoading() { document.getElementById('loading').classList.add('active'); }
+function hideLoading() { document.getElementById('loading').classList.remove('active'); }
+
+function setStatus(id, msg, type) {
+  var el = document.getElementById(id);
+  if (el) { el.textContent = msg; el.className = 'status ' + (type || ''); }
+}
+
+// ============================================================
+// TAB 1: ЭКСПОРТ
+// ============================================================
+function doExport() {
+  showLoading();
+  setStatus('export-status', 'Экспортируем данные...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (res.success) {
+        setStatus('export-status', res.message, 'success');
+        loadExportData();
+      } else {
+        setStatus('export-status', res.message, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .exportToDataSheet();
+}
+
+function loadExportData() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(data) {
+      hideLoading();
+      STATE.exportData = data;
+      renderExportTable(data);
+      renderExportStats(data);
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка загрузки: ' + err.message, 'error');
+    })
+    .getData();
+}
+
+function renderExportTable(data) {
+  if (!data || !data.headers) return;
+  var thead = document.getElementById('export-thead');
+  var tbody = document.getElementById('export-tbody');
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+
+  // Заголовки
+  for (var h = 0; h < data.headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = data.headers[h];
+    thead.appendChild(th);
+  }
+
+  // Строки
+  renderExportRows(data.rows);
+}
+
+function renderExportRows(rows) {
+  var tbody = document.getElementById('export-tbody');
+  tbody.innerHTML = '';
+  for (var i = 0; i < rows.length; i++) {
+    var tr = document.createElement('tr');
+    for (var j = 0; j < rows[i].length; j++) {
+      var td = document.createElement('td');
+      var val = rows[i][j];
+      if (typeof val === 'number') {
+        td.className = 'num';
+        td.textContent = val % 1 === 0 ? val : val.toFixed(2);
+      } else {
+        td.textContent = val || '';
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function filterExportTable() {
+  if (!STATE.exportData) return;
+  var query = document.getElementById('export-search').value.toLowerCase();
+  var filtered = STATE.exportData.rows.filter(function(row) {
+    return String(row[0]).toLowerCase().indexOf(query) >= 0 ||
+           String(row[1]).toLowerCase().indexOf(query) >= 0;
+  });
+  renderExportRows(filtered);
+}
+
+function renderExportStats(data) {
+  if (!data || !data.rows) return;
+  var total = data.rows.length;
+  var types = { raw: 0, finished: 0, sets: 0 };
+  data.rows.forEach(function(row) {
+    var isSet = String(row[11] || '').trim();
+    var hasRaw = row[7] && String(row[7]).trim() !== '';
+    if (isSet === 'Да') types.sets++;
+    else if (!hasRaw) types.finished++;
+    else types.raw++;
+  });
+  document.getElementById('export-stats').innerHTML =
+    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Всего: ' + total + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + types.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Готовый товар: ' + types.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + types.sets + '</span>';
+}
+
+function exportCSV() {
+  if (!STATE.exportData || !STATE.exportData.rows.length) {
+    setStatus('export-status', 'Нет данных для экспорта', 'error');
+    return;
+  }
+  var csv = [STATE.exportData.headers.join(';')];
+  STATE.exportData.rows.forEach(function(row) {
+    csv.push(row.map(function(v) { return '"' + String(v || '').replace(/"/g, '""') + '"'; }).join(';'));
+  });
+  var blob = new Blob(['\uFEFF' + csv.join('\n')], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'export_1cData.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// TAB 2: ПАРАМЕТРЫ
+// ============================================================
+function getParamsFromUI() {
+  return {
+    usd: parseFloat(document.getElementById('p-usd').value) || 92,
+    rmb: parseFloat(document.getElementById('p-rmb').value) || 12.8,
+    log: parseFloat(document.getElementById('p-log').value) || 4.5,
+    com: parseFloat(document.getElementById('p-com').value) || 1.05,
+    priceCol: document.getElementById('p-priceCol').value || 'Q',
+    ndsRate: parseFloat(document.getElementById('p-ndsRate').value) || 0.22,
+    taxRate: parseFloat(document.getElementById('p-taxRate').value) || 0.065
+  };
+}
+
+function setParamsToUI(p) {
+  document.getElementById('p-usd').value = p.usd;
+  document.getElementById('p-rmb').value = p.rmb;
+  document.getElementById('p-log').value = p.log;
+  document.getElementById('p-com').value = p.com;
+  document.getElementById('p-priceCol').value = p.priceCol || 'Q';
+  document.getElementById('p-ndsRate').value = p.ndsRate;
+  document.getElementById('p-taxRate').value = p.taxRate;
+  STATE.params = p;
+}
+
+function loadParamsUI() {
+  google.script.run
+    .withSuccessHandler(function(p) {
+      setParamsToUI(p);
+      setStatus('params-status', 'Параметры загружены', 'success');
+    })
+    .withFailureHandler(function(err) {
+      setStatus('params-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .getParams();
+}
+
+function saveParamsUI() {
+  var p = getParamsFromUI();
+  google.script.run
+    .withSuccessHandler(function() {
+      STATE.params = p;
+      setStatus('params-status', 'Параметры сохранены', 'success');
+    })
+    .withFailureHandler(function(err) {
+      setStatus('params-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .saveParams(p);
+}
+
+// ============================================================
+// TAB 3: ФЛАКОНЫ
+// ============================================================
+function loadFlakonsUI() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(flakons) {
+      hideLoading();
+      STATE.flakons = flakons;
+      renderFlakonsTable(flakons);
+      setStatus('flakons-status', 'Загружено ' + flakons.length + ' флаконов', 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('flakons-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .getFlakonList();
+}
+
+function renderFlakonsTable(flakons) {
+  var tbody = document.getElementById('flakons-tbody');
+  tbody.innerHTML = '';
+  for (var i = 0; i < flakons.length; i++) {
+    var f = flakons[i];
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + esc(f.name) + '</td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="volume" step="1" value="' + (f.volume || 0) + '"></td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="price" step="0.01" value="' + (f.price || 0) + '"></td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="nds" step="0.01" value="' + (f.nds || 0) + '"></td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="delivery" step="0.01" value="' + (f.delivery || 0) + '"></td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label || 0) + '"></td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function collectFlakonData() {
+  var flakons = [];
+  var rows = document.querySelectorAll('#flakons-tbody tr');
+  for (var i = 0; i < rows.length; i++) {
+    var inputs = rows[i].querySelectorAll('input');
+    flakons.push({
+      name: STATE.flakons[i].name,
+      volume: parseFloat(inputs[0].value) || 0,
+      price: parseFloat(inputs[1].value) || 0,
+      nds: parseFloat(inputs[2].value) || 0,
+      delivery: parseFloat(inputs[3].value) || 0,
+      label: parseFloat(inputs[4].value) || 0
+    });
+  }
+  return flakons;
+}
+
+function saveFlakonDataUI() {
+  var data = collectFlakonData();
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      STATE.flakons = data;
+      setStatus('flakons-status', 'Сохранено ' + res.count + ' флаконов', 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('flakons-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .saveFlakonData(data);
+}
+
+// ============================================================
+// TAB 4: СЕБЕСТОИМОСТЬ
+// ============================================================
+function runCalculation() {
+  var p = getParamsFromUI();
+  showLoading();
+  setStatus('cost-status', 'Расчёт...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res.success) {
+        setStatus('cost-status', res.message, 'error');
+        return;
+      }
+      STATE.calcResults = res.results;
+      setStatus('cost-status', 'Рассчитано ' + res.count + ' позиций', 'success');
+      renderCostTable(res.results);
+      renderCostStats(res.results);
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .calculateAll(p);
+}
+
+function renderCostTable(results) {
+  var tbody = document.getElementById('cost-tbody');
+  tbody.innerHTML = '';
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var diffClass = r.diff > 0 ? 'diff-pos' : (r.diff < 0 ? 'diff-neg' : 'diff-zero');
+    var badgeClass = r.type === 'Сырьё' ? 'badge-raw' : (r.type === 'Готовый товар' ? 'badge-finished' : 'badge-set');
+    var pctStr = r.cost1C > 0 ? (r.diffPct * 100).toFixed(1) + '%' : '—';
+
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-type', r.type);
+    tr.setAttribute('data-name', (r.name || '').toLowerCase());
+    tr.innerHTML =
+      '<td>' + esc(r.name) + '</td>' +
+      '<td><span class="badge ' + badgeClass + '">' + esc(r.type) + '</span></td>' +
+      '<td class="num">' + fmt(r.raw) + '</td>' +
+      '<td class="num">' + fmt(r.taxDuty) + '</td>' +
+      '<td class="num">' + fmt(r.delivery) + '</td>' +
+      '<td class="num">' + fmt(r.flakon) + '</td>' +
+      '<td class="num">' + fmt(r.flakonTax) + '</td>' +
+      '<td class="num">' + fmt(r.flakonDelivery) + '</td>' +
+      '<td class="num">' + fmt(r.label) + '</td>' +
+      '<td class="num col-total"><b>' + fmt(r.total) + '</b></td>' +
+      '<td class="num">' + fmt(r.cost1C) + '</td>' +
+      '<td class="num ' + diffClass + '">' + (r.diff > 0 ? '+' : '') + fmt(r.diff) + '</td>' +
+      '<td class="num ' + diffClass + '">' + pctStr + '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function filterCostTable() {
+  var query = (document.getElementById('cost-search').value || '').toLowerCase();
+  var typeFilter = document.getElementById('cost-type-filter').value;
+  var rows = document.querySelectorAll('#cost-tbody tr');
+  for (var i = 0; i < rows.length; i++) {
+    var name = rows[i].getAttribute('data-name');
+    var type = rows[i].getAttribute('data-type');
+    var matchName = !query || name.indexOf(query) >= 0;
+    var matchType = !typeFilter || type === typeFilter;
+    rows[i].style.display = (matchName && matchType) ? '' : 'none';
+  }
+}
+
+function renderCostStats(results) {
+  var totals = { raw: 0, finished: 0, sets: 0, totalCost: 0, total1C: 0 };
+  results.forEach(function(r) {
+    if (r.type === 'Сырьё') totals.raw++;
+    else if (r.type === 'Готовый товар') totals.finished++;
+    else totals.sets++;
+    totals.totalCost += r.total;
+    totals.total1C += r.cost1C;
+  });
+  document.getElementById('cost-stats').innerHTML =
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + totals.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Гот.товар: ' + totals.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + totals.sets + '</span>' +
+    '<span class="stat-item">|</span>' +
+    '<span class="stat-item">Сумма расчёт: <b>' + fmt(totals.totalCost) + '</b></span>' +
+    '<span class="stat-item">Сумма 1С: <b>' + fmt(totals.total1C) + '</b></span>';
+}
+
+function saveResultsUI() {
+  if (!STATE.calcResults || STATE.calcResults.length === 0) {
+    setStatus('cost-status', 'Сначала выполните расчёт', 'error');
+    return;
+  }
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      setStatus('cost-status', 'Записано ' + res.count + ' строк на лист "' + res.sheetName + '"', 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .saveResults(STATE.calcResults, getParamsFromUI());
+}
+
+// ============================================================
+// TAB 5: КАЛЬКУЛЯТОР
+// ============================================================
+function populateCalcSelects() {
+  if (!STATE.exportData || !STATE.exportData.rows) return;
+  var sel = document.getElementById('calc-select');
+  var flSel = document.getElementById('calc-flakon');
+  if (sel.options.length <= 1) {
+    for (var i = 0; i < STATE.exportData.rows.length; i++) {
+      var name = STATE.exportData.rows[i][0];
+      if (name) {
+        var opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      }
+    }
+  }
+  if (flSel.options.length <= 1 && STATE.flakons.length > 0) {
+    for (var j = 0; j < STATE.flakons.length; j++) {
+      var opt2 = document.createElement('option');
+      opt2.value = STATE.flakons[j].name;
+      opt2.textContent = STATE.flakons[j].name;
+      flSel.appendChild(opt2);
+    }
+  }
+}
+
+function onCalcSelect() {
+  var idx = document.getElementById('calc-select').value;
+  if (idx === '' || !STATE.exportData) return;
+  var row = STATE.exportData.rows[parseInt(idx)];
+  if (!row) return;
+
+  var isSet = String(row[11] || '').trim();
+  var hasRaw = row[7] && String(row[7]).trim() !== '';
+  var type = isSet === 'Да' ? 'Наборы' : (!hasRaw ? 'Готовый товар' : 'Сырьё');
+
+  document.getElementById('calc-type').value = type;
+  document.getElementById('calc-price').value = row[16] || 0;
+  document.getElementById('calc-vol').value = row[4] || 0;
+  document.getElementById('calc-weight').value = row[12] || 0;
+  document.getElementById('calc-flakon').value = String(row[8] || '').trim();
+  document.getElementById('calc-cost1c').value = row[14] || 0;
+
+  calcManual();
+}
+
+function calcManual() {
+  var p = getParamsFromUI();
+  var input = {
+    name: 'Ручной расчёт',
+    type: document.getElementById('calc-type').value,
+    price: parseFloat(document.getElementById('calc-price').value) || 0,
+    volume: parseFloat(document.getElementById('calc-vol').value) || 0,
+    weight: parseFloat(document.getElementById('calc-weight').value) || 0,
+    flakonName: document.getElementById('calc-flakon').value || '',
+    cost1C: parseFloat(document.getElementById('calc-cost1c').value) || 0,
+    usd: p.usd, rmb: p.rmb, log: p.log, com: p.com,
+    ndsRate: p.ndsRate, taxRate: p.taxRate
+  };
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      renderCalcResult(res);
+    })
+    .calculateManual(input);
+}
+
+function renderCalcResult(r) {
+  var el = document.getElementById('calc-result');
+  var diffClass = r.diff > 0 ? 'diff-pos' : (r.diff < 0 ? 'diff-neg' : 'diff-zero');
+  el.innerHTML =
+    '<table>' +
+    '<tr><td>Тип</td><td><b>' + esc(r.type) + '</b></td></tr>' +
+    '<tr><td>Сырьё</td><td class="num">' + fmt(r.raw) + '</td></tr>' +
+    '<tr><td>Нал+Пош</td><td class="num">' + fmt(r.taxDuty) + '</td></tr>' +
+    '<tr><td>Доставка</td><td class="num">' + fmt(r.delivery) + '</td></tr>' +
+    '<tr><td>Флакон</td><td class="num">' + fmt(r.flakon) + '</td></tr>' +
+    '<tr><td>НДС флакона</td><td class="num">' + fmt(r.flakonTax) + '</td></tr>' +
+    '<tr><td>Доставка флакона</td><td class="num">' + fmt(r.flakonDelivery) + '</td></tr>' +
+    '<tr><td>Этикетка</td><td class="num">' + fmt(r.label) + '</td></tr>' +
+    '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(r.total) + ' ₽</td></tr>' +
+    (r.cost1C > 0 ?
+      '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(r.cost1C) + '</td></tr>' +
+      '<tr class="diff-row"><td>Разница</td><td class="num ' + diffClass + '">' + (r.diff > 0 ? '+' : '') + fmt(r.diff) + ' (' + (r.diffPct * 100).toFixed(1) + '%)</td></tr>'
+    : '') +
+    '</table>';
+}
+
+// ============================================================
+// TAB 6: ПРОВЕРКА
+// ============================================================
+function populateVerifySelect() {
+  if (!STATE.exportData || !STATE.exportData.rows) return;
+  var sel = document.getElementById('verify-select');
+  if (sel.options.length <= 1) {
+    for (var i = 0; i < STATE.exportData.rows.length; i++) {
+      var name = STATE.exportData.rows[i][0];
+      if (name) {
+        var opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      }
+    }
+  }
+}
+
+function runVerification() {
+  var idx = document.getElementById('verify-select').value;
+  if (idx === '') return;
+  var p = getParamsFromUI();
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res.success) return;
+      renderVerification(res);
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      document.getElementById('verify-output').innerHTML = '<p class="status error">' + err.message + '</p>';
+    })
+    .getVerification(parseInt(idx), p);
+}
+
+function renderVerification(data) {
+  var html = '<h3>' + esc(data.name) + '</h3>';
+  html += '<p style="margin-bottom:16px">Тип: <b>' + esc(data.type) + '</b> | USD=' + data.params.usd + ' | RMB=' + data.params.rmb + ' | Лог=' + data.params.log + ' | Ком=' + data.params.com + ' | НДС=' + data.params.ndsRate + ' | Пошлина=' + data.params.taxRate + ' | Цена из кол. ' + data.params.priceCol + '</p>';
+
+  for (var i = 0; i < data.steps.length; i++) {
+    var step = data.steps[i];
+    var cls = 'verify-step';
+    if (step.title === 'ИТОГО') cls += ' step-total';
+    if (step.title.indexOf('Сравнение') >= 0) cls += ' step-diff';
+
+    html += '<div class="' + cls + '">';
+    html += '<div class="step-title">' + (i + 1) + '. ' + esc(step.title) + '</div>';
+    if (step.formula) html += '<div class="step-formula">' + esc(step.formula) + '</div>';
+    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'ИТОГО' ? ' ₽' : '') + '</div>';
+    html += '</div>';
+  }
+
+  document.getElementById('verify-output').innerHTML = html;
+}
+
+// ============================================================
+// УТИЛИТЫ
+// ============================================================
+function fmt(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  var num = parseFloat(n);
+  if (isNaN(num)) return '—';
+  return num.toFixed(2);
+}
+
+function esc(s) {
+  if (!s) return '';
+  var div = document.createElement('div');
+  div.textContent = String(s);
+  return div.innerHTML;
+}
+
+// ============================================================
+// ИНИЦИАЛИЗАЦИЯ
+// ============================================================
+window.addEventListener('load', function() {
+  loadExportData();
+  loadParamsUI();
+});
+</script>

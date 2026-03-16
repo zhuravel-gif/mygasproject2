@@ -1,0 +1,114 @@
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', -apple-system, sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 13px; }
+
+/* Navbar */
+.navbar { background: #1a73e8; color: #fff; padding: 0 20px; display: flex; align-items: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.nav-brand { font-size: 16px; font-weight: 600; padding: 12px 20px 12px 0; white-space: nowrap; }
+.nav-tabs { display: flex; gap: 2px; overflow-x: auto; }
+.nav-tab { background: none; border: none; color: rgba(255,255,255,.7); padding: 12px 16px; cursor: pointer; font-size: 13px; white-space: nowrap; border-bottom: 3px solid transparent; transition: .2s; }
+.nav-tab:hover { color: #fff; background: rgba(255,255,255,.1); }
+.nav-tab.active { color: #fff; border-bottom-color: #fff; font-weight: 600; }
+
+/* Container */
+.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+
+/* Cards */
+.card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.card h2 { font-size: 18px; margin-bottom: 8px; color: #202124; }
+.hint { color: #5f6368; margin-bottom: 12px; }
+
+/* Tabs */
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Buttons */
+.actions { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.btn { padding: 8px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; font-weight: 500; transition: .2s; }
+.btn-primary { background: #1a73e8; color: #fff; }
+.btn-primary:hover { background: #1557b0; }
+.btn-secondary { background: #e8eaed; color: #202124; }
+.btn-secondary:hover { background: #dadce0; }
+.btn-outline { background: none; border: 1px solid #dadce0; color: #1a73e8; }
+.btn-outline:hover { background: #e8f0fe; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Inputs */
+.params-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.param-group { display: flex; flex-direction: column; gap: 4px; }
+.param-group label { font-weight: 600; font-size: 12px; color: #5f6368; }
+.param-group input, .param-group select { padding: 8px 10px; border: 1px solid #dadce0; border-radius: 6px; font-size: 13px; }
+.param-group input:focus, .param-group select:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,.2); }
+
+/* Search */
+.search-input { width: 100%; padding: 8px 12px; border: 1px solid #dadce0; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+.search-input:focus { outline: none; border-color: #1a73e8; }
+.filter-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.filter-row .search-input { margin-bottom: 0; }
+.filter-row select { padding: 8px 10px; border: 1px solid #dadce0; border-radius: 6px; min-width: 160px; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th { background: #f8f9fa; padding: 8px 10px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #dadce0; white-space: nowrap; }
+.data-table td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; }
+.data-table tr:hover { background: #f8f9fa; }
+.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.col-total { background: #e8f0fe !important; }
+
+/* Editable table */
+.editable td input { width: 80px; padding: 4px 6px; border: 1px solid #e0e0e0; border-radius: 4px; text-align: right; font-size: 12px; }
+.editable td input:focus { border-color: #1a73e8; outline: none; }
+
+/* Diff colors */
+.diff-pos { color: #d93025; font-weight: 600; }
+.diff-neg { color: #188038; font-weight: 600; }
+.diff-zero { color: #5f6368; }
+
+/* Type badges */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+.badge-raw { background: #fce8e6; color: #c5221f; }
+.badge-finished { background: #e6f4ea; color: #137333; }
+.badge-set { background: #e8eaed; color: #5f6368; }
+
+/* Stats bar */
+.stats-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 8px 0; }
+.stat-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.stat-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Status */
+.status { padding: 4px 0; font-size: 13px; min-height: 20px; }
+.status.success { color: #188038; }
+.status.error { color: #d93025; }
+.status.info { color: #1a73e8; }
+
+/* Loading */
+.loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,.9); display: none; justify-content: center; align-items: center; flex-direction: column; z-index: 999; }
+.loading-overlay.active { display: flex; }
+.spinner { width: 40px; height: 40px; border: 3px solid #e8eaed; border-top-color: #1a73e8; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Calc layout */
+.calc-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.calc-result { background: #f8f9fa; border-radius: 8px; padding: 16px; min-height: 200px; }
+.calc-result table { width: 100%; }
+.calc-result td { padding: 4px 8px; }
+.calc-result .total-row { font-weight: 700; font-size: 15px; border-top: 2px solid #dadce0; }
+.calc-result .diff-row { font-size: 12px; color: #5f6368; }
+
+/* Verification */
+.verify-step { padding: 12px 16px; border-left: 3px solid #1a73e8; margin-bottom: 12px; background: #f8f9fa; border-radius: 0 6px 6px 0; }
+.verify-step .step-title { font-weight: 600; margin-bottom: 4px; }
+.verify-step .step-formula { font-family: 'Consolas', monospace; font-size: 12px; color: #5f6368; white-space: pre-wrap; margin-bottom: 4px; }
+.verify-step .step-result { font-size: 15px; font-weight: 700; color: #1a73e8; }
+.verify-step.step-total { border-left-color: #188038; }
+.verify-step.step-total .step-result { color: #188038; }
+.verify-step.step-diff { border-left-color: #e8710a; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .navbar { flex-direction: column; align-items: flex-start; }
+  .calc-layout { grid-template-columns: 1fr; }
+  .params-grid { grid-template-columns: 1fr; }
+}
+</style>
