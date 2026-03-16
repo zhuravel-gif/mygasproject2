@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: sans-serif; padding: 15px; font-size: 13px; }
+    .row { margin-bottom: 8px; }
+    label { font-weight: bold; display: block; }
+    input { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { width: 100%; padding: 10px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+    #prog-cont { width: 100%; background: #eee; height: 10px; margin-top: 15px; display: none; border-radius: 5px; }
+    #prog-bar { width: 0%; height: 100%; background: #34a853; border-radius: 5px; transition: 0.3s; }
+  </style>
+</head>
+<body>
+  <div class="row"><label>Курс USD</label><input type="number" id="usd" value="92"></div>
+  <div class="row"><label>Курс RMB</label><input type="number" id="rmb" value="12.8"></div>
+  <div class="row"><label>Логистика</label><input type="number" id="log" value="4.5"></div>
+  <div class="row"><label>Комиссия</label><input type="number" id="com" value="1.05"></div>
+  <div class="row"><label>Столбец НДС</label><input type="text" id="nds" value="P"></div>
+  <div class="row"><label>Столбец Пошлина</label><input type="text" id="tax" value="Q"></div>
+  <div class="row"><label>Столбец Вес</label><input type="text" id="ves" value="R"></div>
+  <div class="row"><label style="color:#d93025">Столбец ЦЕНА</label><input type="text" id="priceCol" value="Q"></div>
+  <button id="btn" onclick="run()">Рассчитать V1</button>
+  <div id="prog-cont"><div id="prog-bar"></div></div>
+  <p id="msg" style="text-align:center"></p>
+
+  <script>
+    function run() {
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      document.getElementById('prog-cont').style.display = 'block';
+      document.getElementById('prog-bar').style.width = '50%';
+      const p = {
+        usd: document.getElementById('usd').value,
+        rmb: document.getElementById('rmb').value,
+        log: document.getElementById('log').value,
+        com: document.getElementById('com').value,
+        nds: document.getElementById('nds').value,
+        tax: document.getElementById('tax').value,
+        ves: document.getElementById('ves').value,
+        priceCol: document.getElementById('priceCol').value
+      };
+      google.script.run.withSuccessHandler(r => {
+        document.getElementById('prog-bar').style.width = '100%';
+        document.getElementById('msg').innerText = r;
+        setTimeout(() => google.script.host.close(), 1000);
+      }).runCalculation(p);
+    }
+  </script>
+</body>
+</html>
