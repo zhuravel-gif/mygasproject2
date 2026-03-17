@@ -1,5 +1,5 @@
 /**
- * DATA SERVICE — чтение/запись данных из Google Sheets
+ * DATA SERVICE — чтение и запись данных Google Sheets.
  */
 
 var CFG = {
@@ -7,221 +7,186 @@ var CFG = {
   FLAKONS: 'Флаконы',
   BASIS: 'basis',
   RESULTS: 'Результаты',
-  // Структура 1cData: A-N (14 колонок из файла) + O,P,Q,R (расчётные)
-  BASE_COLS: 14,      // A-N
-  COST_1C_COL: 14,    // O — Себестоимость 1С
-  PRICE_COL: 15,      // P — Цена поставщика
-  NDS_COL: 16,        // Q — НДС
-  TAX_COL: 17,        // R — Пошлина
-  TOTAL_COLS: 18      // A-R всего
+  META: '__meta',
+  BASE_FIELDS: [
+    { key: 'name', label: 'Номенклатура.Наименование' },
+    { key: 'article', label: 'Артикул' },
+    { key: 'articleWb', label: 'Артикул ВБ' },
+    { key: 'category', label: 'Категория товаров' },
+    { key: 'volume', label: 'Объем тары' },
+    { key: 'group2', label: 'Номенклатура.Товарная группа 2 (Общие)' },
+    { key: 'group3', label: 'Номенклатура.Товарная группа 3 (Общие)' },
+    { key: 'raw', label: 'Номенклатура.Основное сырье (Общие)' },
+    { key: 'flakon', label: 'Номенклатура.Тара (флакон) (Общие)' },
+    { key: 'setQty', label: 'Номенклатура.Количество лаков в наборе (Общие)' },
+    { key: 'articleMp', label: 'Номенклатура.Артикул МП' },
+    { key: 'isSet', label: 'Номенклатура.Это набор (RockNail)' },
+    { key: 'weight', label: 'Номенклатура.Вес (числитель)' },
+    { key: 'group1', label: 'Номенклатура.Товарная группа 1 (Общие)' }
+  ],
+  CALC_FIELDS: [
+    { key: 'cost1C', label: 'Себестоимость 1С' },
+    { key: 'supplierPrice', label: 'Цена поставщика' },
+    { key: 'nds', label: 'НДС' },
+    { key: 'tax', label: 'Пошлина' }
+  ],
+  BASE_COLS: 14,
+  COST_1C_COL: 14,
+  PRICE_COL: 15,
+  NDS_COL: 16,
+  TAX_COL: 17,
+  TOTAL_COLS: 18
 };
 
-// Жёсткие заголовки расчётных колонок
-var CALC_HEADERS = ['Себестоимость 1С', 'Цена поставщика', 'НДС', 'Пошлина'];
+var IMPORT_META_KEYS = {
+  nomenclature: 'mapping.nomenclature',
+  cost: 'mapping.cost',
+  supplier: 'mapping.supplier',
+  rateDefaults: 'defaults.rate'
+};
 
-// ============================================================
-// ИМПОРТ НОМЕНКЛАТУРЫ (базовый файл)
-// ============================================================
+function getImportSettings() {
+  return {
+    mappings: {
+      nomenclature: getSavedImportMapping_('nomenclature'),
+      cost: getSavedImportMapping_('cost'),
+      supplier: getSavedImportMapping_('supplier')
+    },
+    rateDefaults: getRateDefaults_()
+  };
+}
 
-/**
- * Принимает массив данных (заголовки + строки) из клиента,
- * записывает на лист 1cData, добавляет колонки НДС и Пошлина.
- * @param {Array[]} data — [headers[], row1[], row2[], ...]
- * @param {number} ndsDefault — значение НДС по умолчанию (0.22)
- * @param {number} taxDefault — значение Пошлины по умолчанию (0.065)
- */
-function importNomenclature(data, ndsDefault, taxDefault) {
-  if (!data || data.length < 2) return { success: false, message: 'Файл пустой или нет данных' };
+function importBaseNomenclature(payload) {
+  if (!payload || !payload.rows || payload.rows.length === 0) {
+    return { success: false, message: 'Нет строк для импорта номенклатуры.' };
+  }
+
+  var defaults = payload.defaults || {};
+  var ndsDefault = coerceNumber_(defaults.nds);
+  var taxDefault = coerceNumber_(defaults.tax);
+  if (ndsDefault === '') ndsDefault = 0.22;
+  if (taxDefault === '') taxDefault = 0.065;
+
+  var rows = [];
+  for (var i = 0; i < payload.rows.length; i++) {
+    var item = payload.rows[i];
+    if (!hasMeaningfulValue_(item)) continue;
+    rows.push(buildBaseRow_(item, ndsDefault, taxDefault));
+  }
+
+  if (rows.length === 0) {
+    return { success: false, message: 'После фильтрации не осталось данных для импорта.' };
+  }
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.DATA);
-
-  // Снять защиту если есть
   if (sheet) {
-    sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
+    removeSheetProtections_(sheet);
     sheet.clear();
   } else {
     sheet = ss.insertSheet(CFG.DATA);
   }
 
-  var headers = data[0].slice(0, CFG.BASE_COLS);
-  // Дополнить до 14 если меньше
-  while (headers.length < CFG.BASE_COLS) headers.push('');
-  // Добавить расчётные заголовки
-  headers = headers.concat(CALC_HEADERS);
-
-  var rows = [];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i].slice(0, CFG.BASE_COLS);
-    while (row.length < CFG.BASE_COLS) row.push('');
-    row.push('', '', ndsDefault || 0.22, taxDefault || 0.065); // O,P,Q,R
-    rows.push(row);
-  }
-
-  var allData = [headers].concat(rows);
+  var allData = [getProjectHeaders_()].concat(rows);
   sheet.getRange(1, 1, allData.length, CFG.TOTAL_COLS).setValues(allData);
+  formatDataSheet_(sheet, rows.length);
+  applyWarningProtection_(sheet, '1cData — данные импортированы');
 
-  // Форматирование
-  sheet.getRange(1, 1, 1, CFG.TOTAL_COLS).setFontWeight('bold').setBackground('#4a86c8').setFontColor('#ffffff');
-  sheet.setFrozenRows(1);
-  // Формат НДС и Пошлины как проценты
-  if (rows.length > 0) {
-    sheet.getRange(2, CFG.NDS_COL + 1, rows.length, 2).setNumberFormat('0.0%');
-  }
-
-  // Защита (warning only)
-  var protection = sheet.protect().setDescription('1cData — данные импортированы');
-  protection.setWarningOnly(true);
-
-  return { success: true, message: 'Импортировано ' + rows.length + ' позиций', count: rows.length };
-}
-
-// ============================================================
-// ИМПОРТ СЕБЕСТОИМОСТИ 1С (маппинг по номенклатуре)
-// ============================================================
-
-/**
- * @param {Object[]} mappedData — [{ name: "...", value: 123.45 }, ...]
- */
-function importCost1C(mappedData) {
-  return _importByName(mappedData, CFG.COST_1C_COL, 'Себестоимость 1С');
-}
-
-// ============================================================
-// ИМПОРТ ЦЕНЫ ПОСТАВЩИКА (маппинг по номенклатуре)
-// ============================================================
-
-/**
- * @param {Object[]} mappedData — [{ name: "...", value: 123.45 }, ...]
- */
-function importSupplierPrice(mappedData) {
-  return _importByName(mappedData, CFG.PRICE_COL, 'Цена поставщика');
-}
-
-/**
- * Общая функция: заполняет колонку targetCol по совпадению номенклатуры
- */
-function _importByName(mappedData, targetCol, label) {
-  if (!mappedData || mappedData.length === 0) return { success: false, message: 'Нет данных для импорта' };
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.DATA);
-  if (!sheet || sheet.getLastRow() < 2) return { success: false, message: 'Лист 1cData пуст. Сначала импортируйте номенклатуру.' };
-
-  // Снять защиту
-  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
-
-  var data = sheet.getDataRange().getValues();
-
-  // Построить map из импортируемых данных
-  var importMap = {};
-  for (var i = 0; i < mappedData.length; i++) {
-    var key = String(mappedData[i].name || '').trim().toLowerCase();
-    if (key) importMap[key] = mappedData[i].value;
-  }
-
-  // Найти и заполнить
-  var matched = 0;
-  for (var r = 1; r < data.length; r++) {
-    var name = String(data[r][0] || '').trim().toLowerCase();
-    if (name && importMap.hasOwnProperty(name)) {
-      data[r][targetCol] = importMap[name];
-      matched++;
-    }
-  }
-
-  // Записать обратно
-  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
-
-  // Восстановить защиту
-  var protection = sheet.protect().setDescription('1cData — данные импортированы');
-  protection.setWarningOnly(true);
+  saveImportMapping_('nomenclature', payload.mapping || null);
+  setRateDefaults_({ nds: ndsDefault, tax: taxDefault });
 
   return {
     success: true,
-    message: label + ': найдено ' + matched + ' совпадений из ' + mappedData.length + ' строк файла',
-    matched: matched,
-    total: mappedData.length
+    message: 'Базовая номенклатура импортирована: ' + rows.length + ' строк.',
+    count: rows.length
   };
 }
 
-// ============================================================
-// ОБНОВЛЕНИЕ НДС/ПОШЛИНЫ ПО СТРОКАМ
-// ============================================================
-
-function updateNdsTax(updates) {
-  // updates = [{ row: 0-based index, nds: 0.22, tax: 0.065 }, ...]
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.DATA);
-  if (!sheet) return { success: false };
-
-  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
-
-  for (var i = 0; i < updates.length; i++) {
-    var u = updates[i];
-    var sheetRow = u.row + 2; // +1 для header, +1 для 1-based
-    if (u.nds !== undefined) sheet.getRange(sheetRow, CFG.NDS_COL + 1).setValue(u.nds);
-    if (u.tax !== undefined) sheet.getRange(sheetRow, CFG.TAX_COL + 1).setValue(u.tax);
-  }
-
-  var protection = sheet.protect().setDescription('1cData — данные импортированы');
-  protection.setWarningOnly(true);
-
-  return { success: true };
+function importCurrentCost(payload) {
+  return importMappedValues_(payload, CFG.COST_1C_COL, 'Себестоимость 1С', 'cost');
 }
 
-// Массовое обновление НДС/Пошлины для всех строк
+function importSupplierPriceData(payload) {
+  return importMappedValues_(payload, CFG.PRICE_COL, 'Цена поставщика', 'supplier');
+}
+
+function updateNdsTax(updates) {
+  if (!updates || updates.length === 0) {
+    return { success: false, message: 'Нет изменений для сохранения.' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.DATA);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { success: false, message: 'Лист 1cData не заполнен.' };
+  }
+
+  removeSheetProtections_(sheet);
+
+  for (var i = 0; i < updates.length; i++) {
+    var item = updates[i];
+    var rowNumber = Number(item.row) + 2;
+    if (item.nds !== undefined) {
+      sheet.getRange(rowNumber, CFG.NDS_COL + 1).setValue(normalizeRateValue_(item.nds, 0.22));
+    }
+    if (item.tax !== undefined) {
+      sheet.getRange(rowNumber, CFG.TAX_COL + 1).setValue(normalizeRateValue_(item.tax, 0.065));
+    }
+  }
+
+  formatDataSheet_(sheet, sheet.getLastRow() - 1);
+  applyWarningProtection_(sheet, '1cData — данные импортированы');
+
+  return { success: true, count: updates.length };
+}
+
 function updateAllNdsTax(nds, tax) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.DATA);
-  if (!sheet || sheet.getLastRow() < 2) return { success: false };
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { success: false, message: 'Лист 1cData не заполнен.' };
+  }
 
-  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
+  removeSheetProtections_(sheet);
 
   var numRows = sheet.getLastRow() - 1;
-  var ndsRange = sheet.getRange(2, CFG.NDS_COL + 1, numRows, 1);
-  var taxRange = sheet.getRange(2, CFG.TAX_COL + 1, numRows, 1);
-
+  var ndsValue = normalizeRateValue_(nds, 0.22);
+  var taxValue = normalizeRateValue_(tax, 0.065);
   var ndsVals = [];
   var taxVals = [];
   for (var i = 0; i < numRows; i++) {
-    ndsVals.push([nds]);
-    taxVals.push([tax]);
+    ndsVals.push([ndsValue]);
+    taxVals.push([taxValue]);
   }
-  ndsRange.setValues(ndsVals);
-  taxRange.setValues(taxVals);
 
-  var protection = sheet.protect().setDescription('1cData — данные импортированы');
-  protection.setWarningOnly(true);
+  sheet.getRange(2, CFG.NDS_COL + 1, numRows, 1).setValues(ndsVals);
+  sheet.getRange(2, CFG.TAX_COL + 1, numRows, 1).setValues(taxVals);
+  formatDataSheet_(sheet, numRows);
+  applyWarningProtection_(sheet, '1cData — данные импортированы');
+
+  setRateDefaults_({ nds: ndsValue, tax: taxValue });
 
   return { success: true, count: numRows };
 }
 
-// ============================================================
-// ЧТЕНИЕ ДАННЫХ
-// ============================================================
-
 function getData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.DATA);
-  if (!sheet || sheet.getLastRow() < 1) return { headers: [], rows: [] };
+  if (!sheet || sheet.getLastRow() < 1) {
+    return { headers: getProjectHeaders_(), rows: [] };
+  }
 
   var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return { headers: data[0] || [], rows: [] };
+  if (data.length < 2) {
+    return { headers: data[0] || getProjectHeaders_(), rows: [] };
+  }
 
   return { headers: data[0], rows: data.slice(1) };
 }
 
 function getDataHeaders() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.DATA);
-  if (!sheet || sheet.getLastRow() < 1) return [];
-  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return getProjectHeaders_();
 }
-
-// ============================================================
-// ПАРАМЕТРЫ
-// ============================================================
 
 function getParams() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -229,6 +194,7 @@ function getParams() {
   if (!sheet || sheet.getLastRow() < 2) {
     return { usd: 92, rmb: 12.8, log: 4.5, com: 1.05 };
   }
+
   var data = sheet.getRange(2, 1, 1, 4).getValues()[0];
   return {
     usd: data[0] || 92,
@@ -242,14 +208,18 @@ function saveParams(p) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.BASIS) || ss.insertSheet(CFG.BASIS);
   sheet.clear();
-  sheet.getRange(1, 1, 1, 4).setValues([['USD', 'RMB', 'Логистика', 'Комиссия']]).setFontWeight('bold');
-  sheet.getRange(2, 1, 1, 4).setValues([[p.usd, p.rmb, p.log, p.com]]);
+  sheet.getRange(1, 1, 1, 4)
+    .setValues([['USD', 'RMB', 'Логистика', 'Комиссия']])
+    .setFontWeight('bold');
+  sheet.getRange(2, 1, 1, 4)
+    .setValues([[
+      coerceNumber_(p.usd) || 92,
+      coerceNumber_(p.rmb) || 12.8,
+      coerceNumber_(p.log) || 4.5,
+      coerceNumber_(p.com) || 1.05
+    ]]);
   return { success: true };
 }
-
-// ============================================================
-// ФЛАКОНЫ
-// ============================================================
 
 function getFlakonList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -271,23 +241,26 @@ function getFlakonList() {
     return result;
   }
 
-  // Собрать уникальные из 1cData
   var dataSheet = ss.getSheetByName(CFG.DATA);
   if (!dataSheet || dataSheet.getLastRow() < 2) return [];
 
   var data = dataSheet.getDataRange().getValues();
   var flakonMap = {};
-  for (var i = 1; i < data.length; i++) {
-    var fName = String(data[i][8]).trim(); // Колонка I — Тара (флакон)
-    if (fName && fName !== '' && fName !== 'undefined' && !flakonMap[fName]) {
-      flakonMap[fName] = {
-        name: fName,
-        volume: data[i][4] || 0,
-        price: 0, nds: 0, delivery: 0, label: 0
+  for (var j = 1; j < data.length; j++) {
+    var flakonName = String(data[j][8] || '').trim();
+    if (flakonName && !flakonMap[flakonName]) {
+      flakonMap[flakonName] = {
+        name: flakonName,
+        volume: data[j][4] || 0,
+        price: 0,
+        nds: 0,
+        delivery: 0,
+        label: 0
       };
     }
   }
-  return Object.values(flakonMap);
+
+  return Object.keys(flakonMap).map(function(key) { return flakonMap[key]; });
 }
 
 function saveFlakonData(flakons) {
@@ -295,39 +268,77 @@ function saveFlakonData(flakons) {
   var sheet = ss.getSheetByName(CFG.FLAKONS) || ss.insertSheet(CFG.FLAKONS);
   sheet.clear();
 
-  var headers = ['Флакон', 'Объём', 'Цена', 'НДС', 'Доставка', 'Этикетка'];
+  var headers = ['Флакон', 'Объем', 'Цена', 'НДС', 'Доставка', 'Этикетка'];
   var rows = [headers];
 
   for (var i = 0; i < flakons.length; i++) {
-    var f = flakons[i];
-    rows.push([f.name, f.volume, f.price, f.nds, f.delivery, f.label]);
+    var item = flakons[i];
+    rows.push([
+      item.name || '',
+      coerceNumber_(item.volume) || 0,
+      coerceNumber_(item.price) || 0,
+      coerceNumber_(item.nds) || 0,
+      coerceNumber_(item.delivery) || 0,
+      coerceNumber_(item.label) || 0
+    ]);
   }
 
   sheet.getRange(1, 1, rows.length, headers.length).setValues(rows);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#4a86c8').setFontColor('#ffffff');
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4a86c8')
+    .setFontColor('#ffffff');
   sheet.setFrozenRows(1);
   return { success: true, count: flakons.length };
 }
 
-// ============================================================
-// РЕЗУЛЬТАТЫ
-// ============================================================
-
 function saveResults(results) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetName = CFG.RESULTS + ' ' + Utilities.formatDate(new Date(), 'Europe/Moscow', 'dd.MM.yyyy HH:mm');
+  var timezone = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  var sheetName = CFG.RESULTS + ' ' + Utilities.formatDate(new Date(), timezone, 'dd.MM.yyyy HH:mm');
   var sheet = ss.insertSheet(sheetName);
 
-  var headers = ['Номенклатура', 'Тип', 'Сырьё', 'Нал+Пош', 'Доставка', 'Флакон', 'Нал.Фл', 'Дост.Фл', 'Этикетка', 'ИТОГО', 'Себес 1С', 'Разница', 'Разница %'];
+  var headers = [
+    'Номенклатура',
+    'Тип',
+    'Сырьё',
+    'Нал+Пош',
+    'Доставка',
+    'Флакон',
+    'Нал.Фл',
+    'Дост.Фл',
+    'Этикетка',
+    'ИТОГО',
+    'Себес 1С',
+    'Разница',
+    'Разница %'
+  ];
   var rows = [headers];
 
   for (var i = 0; i < results.length; i++) {
-    var r = results[i];
-    rows.push([r.name, r.type, r.raw, r.taxDuty, r.delivery, r.flakon, r.flakonTax, r.flakonDelivery, r.label, r.total, r.cost1C, r.diff, r.diffPct]);
+    var result = results[i];
+    rows.push([
+      result.name,
+      result.type,
+      result.raw,
+      result.taxDuty,
+      result.delivery,
+      result.flakon,
+      result.flakonTax,
+      result.flakonDelivery,
+      result.label,
+      result.total,
+      result.cost1C,
+      result.diff,
+      result.diffPct
+    ]);
   }
 
   sheet.getRange(1, 1, rows.length, headers.length).setValues(rows);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#4a86c8').setFontColor('#ffffff');
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4a86c8')
+    .setFontColor('#ffffff');
   sheet.setFrozenRows(1);
 
   if (rows.length > 1) {
@@ -336,4 +347,277 @@ function saveResults(results) {
   }
 
   return { success: true, sheetName: sheetName, count: results.length };
+}
+
+function importNomenclature(data, ndsDefault, taxDefault) {
+  if (!data || data.length < 2) {
+    return { success: false, message: 'Файл пустой или в нем нет строк.' };
+  }
+
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    rows.push(arrayToNamedRow_(data[i]));
+  }
+
+  return importBaseNomenclature({
+    rows: rows,
+    defaults: { nds: ndsDefault, tax: taxDefault }
+  });
+}
+
+function importCost1C(mappedData) {
+  return importCurrentCost({
+    rows: mappedData || []
+  });
+}
+
+function importSupplierPrice(mappedData) {
+  return importSupplierPriceData({
+    rows: mappedData || []
+  });
+}
+
+function importMappedValues_(payload, targetCol, label, mappingType) {
+  if (!payload || !payload.rows || payload.rows.length === 0) {
+    return { success: false, message: 'Нет строк для импорта.' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.DATA);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { success: false, message: 'Сначала загрузите базовую номенклатуру.' };
+  }
+
+  removeSheetProtections_(sheet);
+
+  var data = sheet.getDataRange().getValues();
+  var nameMap = {};
+  var articleMap = {};
+  for (var rowIndex = 1; rowIndex < data.length; rowIndex++) {
+    var nameKey = normalizeMatchKey_(data[rowIndex][0]);
+    var articleKey = normalizeMatchKey_(data[rowIndex][1]);
+    if (nameKey && !nameMap.hasOwnProperty(nameKey)) nameMap[nameKey] = rowIndex;
+    if (articleKey && !articleMap.hasOwnProperty(articleKey)) articleMap[articleKey] = rowIndex;
+  }
+
+  var matchedByName = 0;
+  var matchedByArticle = 0;
+  var unmatched = [];
+
+  for (var i = 0; i < payload.rows.length; i++) {
+    var item = payload.rows[i] || {};
+    var nameLookup = normalizeMatchKey_(item.name);
+    var articleLookup = normalizeMatchKey_(item.article);
+    var targetRow = null;
+
+    if (nameLookup && nameMap.hasOwnProperty(nameLookup)) {
+      targetRow = nameMap[nameLookup];
+      matchedByName++;
+    } else if (articleLookup && articleMap.hasOwnProperty(articleLookup)) {
+      targetRow = articleMap[articleLookup];
+      matchedByArticle++;
+    } else if (unmatched.length < 25) {
+      unmatched.push(item.name || item.article || ('Строка ' + (i + 1)));
+    }
+
+    if (targetRow !== null) {
+      data[targetRow][targetCol] = coerceNumber_(item.value);
+    }
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+  formatDataSheet_(sheet, data.length - 1);
+  applyWarningProtection_(sheet, '1cData — данные импортированы');
+  saveImportMapping_(mappingType, payload.mapping || null);
+
+  var matchedTotal = matchedByName + matchedByArticle;
+  return {
+    success: true,
+    message: label + ': сопоставлено ' + matchedTotal + ' из ' + payload.rows.length + ' строк.',
+    matched: matchedTotal,
+    matchedByName: matchedByName,
+    matchedByArticle: matchedByArticle,
+    unmatched: unmatched,
+    total: payload.rows.length
+  };
+}
+
+function buildBaseRow_(item, ndsDefault, taxDefault) {
+  var row = [];
+  for (var i = 0; i < CFG.BASE_FIELDS.length; i++) {
+    row.push(sanitizeCell_(item[CFG.BASE_FIELDS[i].key]));
+  }
+  row.push('');
+  row.push('');
+  row.push(normalizeRateValue_(item.nds, ndsDefault));
+  row.push(normalizeRateValue_(item.tax, taxDefault));
+  return row;
+}
+
+function getProjectHeaders_() {
+  var headers = [];
+  for (var i = 0; i < CFG.BASE_FIELDS.length; i++) {
+    headers.push(CFG.BASE_FIELDS[i].label);
+  }
+  for (var j = 0; j < CFG.CALC_FIELDS.length; j++) {
+    headers.push(CFG.CALC_FIELDS[j].label);
+  }
+  return headers;
+}
+
+function sanitizeCell_(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  return value;
+}
+
+function hasMeaningfulValue_(item) {
+  if (!item) return false;
+  var keys = Object.keys(item);
+  for (var i = 0; i < keys.length; i++) {
+    var value = item[keys[i]];
+    if (value !== '' && value !== null && value !== undefined) return true;
+  }
+  return false;
+}
+
+function normalizeMatchKey_(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function coerceNumber_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') return value;
+
+  var normalized = String(value)
+    .replace(/\s+/g, '')
+    .replace(',', '.');
+  var parsed = parseFloat(normalized);
+  return isNaN(parsed) ? sanitizeCell_(value) : parsed;
+}
+
+function normalizeRateValue_(value, fallback) {
+  var parsed = coerceNumber_(value);
+  if (parsed === '') return fallback;
+  return parsed;
+}
+
+function formatDataSheet_(sheet, rowCount) {
+  sheet.getRange(1, 1, 1, CFG.TOTAL_COLS)
+    .setFontWeight('bold')
+    .setBackground('#4a86c8')
+    .setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+
+  if (rowCount > 0) {
+    sheet.getRange(2, CFG.COST_1C_COL + 1, rowCount, 2).setNumberFormat('#,##0.00');
+    sheet.getRange(2, CFG.NDS_COL + 1, rowCount, 2).setNumberFormat('0.0%');
+  }
+}
+
+function removeSheetProtections_(sheet) {
+  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(protection) {
+    protection.remove();
+  });
+}
+
+function applyWarningProtection_(sheet, description) {
+  var protection = sheet.protect().setDescription(description);
+  protection.setWarningOnly(true);
+}
+
+function getMetaSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.META);
+  if (!sheet) {
+    sheet = ss.insertSheet(CFG.META);
+    sheet.getRange(1, 1, 1, 2).setValues([['key', 'value']]);
+    sheet.hideSheet();
+  }
+  return sheet;
+}
+
+function getMetaValue_(key) {
+  var sheet = getMetaSheet_();
+  if (sheet.getLastRow() < 2) return '';
+
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] === key) return values[i][1];
+  }
+  return '';
+}
+
+function setMetaValue_(key, value) {
+  var sheet = getMetaSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    sheet.getRange(2, 1, 1, 2).setValues([[key, value]]);
+    return;
+  }
+
+  var values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] === key) {
+      sheet.getRange(i + 2, 2).setValue(value);
+      return;
+    }
+  }
+
+  sheet.getRange(lastRow + 1, 1, 1, 2).setValues([[key, value]]);
+}
+
+function getSavedImportMapping_(type) {
+  var key = IMPORT_META_KEYS[type];
+  if (!key) return null;
+
+  var raw = getMetaValue_(key);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveImportMapping_(type, mapping) {
+  var key = IMPORT_META_KEYS[type];
+  if (!key || !mapping) return;
+  setMetaValue_(key, JSON.stringify(mapping));
+}
+
+function getRateDefaults_() {
+  var raw = getMetaValue_(IMPORT_META_KEYS.rateDefaults);
+  if (!raw) return { nds: 0.22, tax: 0.065 };
+
+  try {
+    var parsed = JSON.parse(raw);
+    return {
+      nds: normalizeRateValue_(parsed.nds, 0.22),
+      tax: normalizeRateValue_(parsed.tax, 0.065)
+    };
+  } catch (err) {
+    return { nds: 0.22, tax: 0.065 };
+  }
+}
+
+function setRateDefaults_(defaults) {
+  setMetaValue_(IMPORT_META_KEYS.rateDefaults, JSON.stringify({
+    nds: normalizeRateValue_(defaults.nds, 0.22),
+    tax: normalizeRateValue_(defaults.tax, 0.065)
+  }));
+}
+
+function arrayToNamedRow_(row) {
+  var result = {};
+  for (var i = 0; i < CFG.BASE_FIELDS.length; i++) {
+    result[CFG.BASE_FIELDS[i].key] = row[i];
+  }
+  if (row.length > CFG.BASE_COLS + 2) result.nds = row[CFG.NDS_COL];
+  if (row.length > CFG.BASE_COLS + 3) result.tax = row[CFG.TAX_COL];
+  return result;
 }
