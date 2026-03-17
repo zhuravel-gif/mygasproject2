@@ -9,7 +9,7 @@
 <nav class="navbar">
   <div class="nav-brand">Калькулятор себестоимости</div>
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showTab('export')">Экспорт данных</button>
+    <button class="nav-tab active" onclick="showTab('export')">Импорт данных</button>
     <button class="nav-tab" onclick="showTab('params')">Параметры</button>
     <button class="nav-tab" onclick="showTab('flakons')">Флаконы</button>
     <button class="nav-tab" onclick="showTab('cost')">Себестоимость</button>
@@ -18,25 +18,122 @@
   </div>
 </nav>
 
-<div id="loading" class="loading-overlay"><div class="spinner"></div><p>Загрузка...</p></div>
+<div id="loading" class="loading-overlay">
+  <div class="spinner"></div>
+  <p>Загрузка...</p>
+</div>
+
+<input
+  id="import-file-input"
+  type="file"
+  accept=".xls,.xlsx,.xlsm,.xlsb"
+  style="display:none"
+  onchange="handleImportFileSelected(event)"
+>
+
+<div id="import-modal" class="modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <h3 id="import-modal-title">Импорт файла</h3>
+        <p id="import-modal-subtitle" class="hint"></p>
+      </div>
+      <button class="btn btn-icon" onclick="closeImportModal()">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="wizard-grid">
+        <div class="wizard-panel">
+          <div class="param-group">
+            <label>Файл</label>
+            <div id="import-file-name" class="info-chip">Файл не выбран</div>
+          </div>
+
+          <div class="param-group">
+            <label>Лист</label>
+            <select id="import-sheet-select" onchange="refreshImportPreview()"></select>
+          </div>
+
+          <div class="param-group">
+            <label>Строка заголовков</label>
+            <input id="import-header-row" type="number" min="1" step="1" value="1" onchange="refreshImportPreview()">
+          </div>
+
+          <div id="import-default-rates" class="params-grid compact hidden">
+            <div class="param-group">
+              <label>НДС по умолчанию</label>
+              <input id="import-default-nds" type="number" step="0.001" value="0.22">
+            </div>
+            <div class="param-group">
+              <label>Пошлина по умолчанию</label>
+              <input id="import-default-tax" type="number" step="0.001" value="0.065">
+            </div>
+          </div>
+
+          <div>
+            <h4 class="section-title">Сопоставление колонок</h4>
+            <div id="import-mapping-grid" class="mapping-grid"></div>
+          </div>
+        </div>
+
+        <div class="wizard-panel">
+          <h4 class="section-title">Предпросмотр</h4>
+          <div class="table-wrap import-preview-wrap">
+            <table class="data-table preview-table">
+              <thead id="import-preview-head"></thead>
+              <tbody id="import-preview-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeImportModal()">Отмена</button>
+      <button class="btn btn-primary" onclick="confirmImport()">Импортировать</button>
+    </div>
+  </div>
+</div>
 
 <main class="container">
-
-  <!-- ==================== TAB 1: ЭКСПОРТ ==================== -->
   <div id="tab-export" class="tab-content active">
     <div class="card">
-      <h2>Экспорт данных из Calc в 1cData</h2>
-      <p class="hint">Копирует столбцы A-N из листа Calc + маппинг данных из 1С и поставщика на лист 1cData.</p>
+      <h2>Импорт в 1cData</h2>
+      <p class="hint">Сначала загрузите базовую номенклатуру из 1С, затем подтяните текущую себестоимость и цену поставщика в уже созданную таблицу.</p>
+
       <div class="actions">
-        <button class="btn btn-primary" onclick="doExport()">Импорт из Calc</button>
-        <button class="btn btn-secondary" onclick="loadExportData()">Обновить таблицу</button>
+        <button class="btn btn-primary" onclick="startImport('nomenclature')">Импорт из 1С номенклатуры</button>
+        <button class="btn btn-secondary" onclick="startImport('cost')">Импорт себестоимости текущей</button>
+        <button class="btn btn-secondary" onclick="startImport('supplier')">Импорт цены поставщика</button>
+        <button class="btn btn-outline" onclick="loadExportData()">Обновить таблицу</button>
         <button class="btn btn-outline" onclick="exportCSV()">Экспорт в CSV</button>
       </div>
+
+      <div class="rate-toolbar">
+        <div class="param-group">
+          <label>НДС для всех строк</label>
+          <input id="bulk-nds" type="number" step="0.001" value="0.22">
+        </div>
+        <div class="param-group">
+          <label>Пошлина для всех строк</label>
+          <input id="bulk-tax" type="number" step="0.001" value="0.065">
+        </div>
+        <button class="btn btn-secondary" onclick="applyRatesToAllUI()">Применить ко всем</button>
+        <button class="btn btn-outline" onclick="saveRateEditsUI()">Сохранить ручные правки НДС/пошлины</button>
+      </div>
+
       <div id="export-status" class="status"></div>
       <div id="export-stats" class="stats-bar"></div>
     </div>
+
     <div class="card">
-      <input type="text" id="export-search" class="search-input" placeholder="Поиск по наименованию..." oninput="filterExportTable()">
+      <input
+        id="export-search"
+        type="text"
+        class="search-input"
+        placeholder="Поиск по наименованию или артикулу..."
+        oninput="filterExportTable()"
+      >
       <div class="table-wrap">
         <table id="export-table" class="data-table">
           <thead><tr id="export-thead"></tr></thead>
@@ -46,45 +143,30 @@
     </div>
   </div>
 
-  <!-- ==================== TAB 2: ПАРАМЕТРЫ ==================== -->
   <div id="tab-params" class="tab-content">
     <div class="card">
       <h2>Параметры расчёта</h2>
-      <p class="hint">Настройка курсов, логистики и модели расчёта. Параметры сохраняются на листе basis.</p>
+      <p class="hint">Настройка валютных курсов, логистики и комиссии. НДС и пошлина теперь задаются в строках 1cData.</p>
+
       <div class="params-grid">
         <div class="param-group">
           <label>Курс USD</label>
-          <input type="number" id="p-usd" step="0.1" value="92">
+          <input id="p-usd" type="number" step="0.1" value="92">
         </div>
         <div class="param-group">
           <label>Курс RMB</label>
-          <input type="number" id="p-rmb" step="0.1" value="12.8">
+          <input id="p-rmb" type="number" step="0.1" value="12.8">
         </div>
         <div class="param-group">
           <label>Логистика ($/кг)</label>
-          <input type="number" id="p-log" step="0.1" value="4.5">
+          <input id="p-log" type="number" step="0.1" value="4.5">
         </div>
         <div class="param-group">
           <label>Комиссия (множитель)</label>
-          <input type="number" id="p-com" step="0.01" value="1.05">
-        </div>
-        <div class="param-group">
-          <label>Колонка Цены</label>
-          <select id="p-priceCol">
-            <option value="Q" selected>Q — Цена поставщика</option>
-            <option value="R">R — Цена за 5 л</option>
-            <option value="S">S — Цена за 10 л и более</option>
-          </select>
-        </div>
-        <div class="param-group">
-          <label>Ставка НДС</label>
-          <input type="number" id="p-ndsRate" step="0.01" value="0.22">
-        </div>
-        <div class="param-group">
-          <label>Ставка Пошлины</label>
-          <input type="number" id="p-taxRate" step="0.001" value="0.065">
+          <input id="p-com" type="number" step="0.01" value="1.05">
         </div>
       </div>
+
       <div class="actions">
         <button class="btn btn-primary" onclick="saveParamsUI()">Сохранить параметры</button>
         <button class="btn btn-secondary" onclick="loadParamsUI()">Загрузить сохранённые</button>
@@ -93,17 +175,18 @@
     </div>
   </div>
 
-  <!-- ==================== TAB 3: ФЛАКОНЫ ==================== -->
   <div id="tab-flakons" class="tab-content">
     <div class="card">
       <h2>Себестоимость флаконов и этикетки</h2>
-      <p class="hint">Данные о стоимости тары. Заполните цены флаконов, НДС, доставку и этикетку.</p>
+      <p class="hint">Заполните цены флаконов, НДС, доставку и этикетку. Эти данные участвуют в расчёте для сырья.</p>
+
       <div class="actions">
         <button class="btn btn-primary" onclick="saveFlakonDataUI()">Сохранить</button>
         <button class="btn btn-secondary" onclick="loadFlakonsUI()">Обновить</button>
       </div>
       <div id="flakons-status" class="status"></div>
     </div>
+
     <div class="card">
       <div class="table-wrap">
         <table class="data-table editable">
@@ -123,7 +206,6 @@
     </div>
   </div>
 
-  <!-- ==================== TAB 4: СЕБЕСТОИМОСТЬ ==================== -->
   <div id="tab-cost" class="tab-content">
     <div class="card">
       <h2>Себестоимость позиций</h2>
@@ -134,9 +216,10 @@
       <div id="cost-status" class="status"></div>
       <div id="cost-stats" class="stats-bar"></div>
     </div>
+
     <div class="card">
       <div class="filter-row">
-        <input type="text" id="cost-search" class="search-input" placeholder="Поиск..." oninput="filterCostTable()">
+        <input id="cost-search" type="text" class="search-input" placeholder="Поиск..." oninput="filterCostTable()">
         <select id="cost-type-filter" onchange="filterCostTable()">
           <option value="">Все типы</option>
           <option value="Сырьё">Сырьё</option>
@@ -144,6 +227,7 @@
           <option value="Наборы">Наборы</option>
         </select>
       </div>
+
       <div class="table-wrap">
         <table class="data-table">
           <thead>
@@ -169,11 +253,11 @@
     </div>
   </div>
 
-  <!-- ==================== TAB 5: КАЛЬКУЛЯТОР ==================== -->
   <div id="tab-calc" class="tab-content">
     <div class="card">
       <h2>Ручной калькулятор</h2>
-      <p class="hint">Выберите существующую позицию или введите значения вручную.</p>
+      <p class="hint">Можно выбрать существующую позицию или задать значения вручную.</p>
+
       <div class="calc-layout">
         <div class="calc-inputs">
           <div class="param-group">
@@ -191,16 +275,16 @@
             </select>
           </div>
           <div class="param-group">
-            <label>Цена</label>
-            <input type="number" id="calc-price" step="0.01" value="0" oninput="calcManual()">
+            <label>Цена поставщика</label>
+            <input id="calc-price" type="number" step="0.01" value="0" oninput="calcManual()">
           </div>
           <div class="param-group">
-            <label>Объём тары (г)</label>
-            <input type="number" id="calc-vol" step="1" value="0" oninput="calcManual()">
+            <label>Объём тары (гр)</label>
+            <input id="calc-vol" type="number" step="1" value="0" oninput="calcManual()">
           </div>
           <div class="param-group">
             <label>Вес (кг)</label>
-            <input type="number" id="calc-weight" step="0.01" value="0" oninput="calcManual()">
+            <input id="calc-weight" type="number" step="0.01" value="0" oninput="calcManual()">
           </div>
           <div class="param-group">
             <label>Флакон</label>
@@ -209,22 +293,31 @@
             </select>
           </div>
           <div class="param-group">
+            <label>НДС</label>
+            <input id="calc-nds" type="number" step="0.001" value="0.22" oninput="calcManual()">
+          </div>
+          <div class="param-group">
+            <label>Пошлина</label>
+            <input id="calc-tax" type="number" step="0.001" value="0.065" oninput="calcManual()">
+          </div>
+          <div class="param-group">
             <label>Себестоимость 1С</label>
-            <input type="number" id="calc-cost1c" step="0.01" value="0" oninput="calcManual()">
+            <input id="calc-cost1c" type="number" step="0.01" value="0" oninput="calcManual()">
           </div>
         </div>
-        <div class="calc-result" id="calc-result">
-          <p class="hint">Заполните поля для расчёта</p>
+
+        <div id="calc-result" class="calc-result">
+          <p class="hint">Заполните поля для расчёта.</p>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ==================== TAB 6: ПРОВЕРКА ==================== -->
   <div id="tab-verify" class="tab-content">
     <div class="card">
       <h2>Проверка расчёта</h2>
-      <p class="hint">Выберите позицию для детального просмотра формул с подстановкой значений.</p>
+      <p class="hint">Выберите позицию для детального просмотра формул и подстановок.</p>
+
       <div class="param-group">
         <label>Позиция</label>
         <select id="verify-select" onchange="runVerification()">
@@ -232,13 +325,14 @@
         </select>
       </div>
     </div>
-    <div class="card" id="verify-output">
-      <p class="hint">Выберите позицию выше</p>
+
+    <div id="verify-output" class="card">
+      <p class="hint">Выберите позицию выше.</p>
     </div>
   </div>
-
 </main>
 
+<?!= include('SheetJsLib') ?>
 <?!= include('Scripts') ?>
 
 </body>
