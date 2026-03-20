@@ -1,28 +1,23 @@
-﻿<script>
+<script>
 // ============================================================
-// Р“Р›РћР‘РђР›Р¬РќРћР• РЎРћРЎРўРћРЇРќРР•
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ
 // ============================================================
 var STATE = {
   exportData: null,    // { headers, rows }
-  calcResults: null,   // РјР°СЃСЃРёРІ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ
-  flakons: [],         // РјР°СЃСЃРёРІ С„Р»Р°РєРѕРЅРѕРІ
-  params: null,        // С‚РµРєСѓС‰РёРµ РїР°СЂР°РјРµС‚СЂС‹
-  xlsxReady: false,    // SheetJS Р·Р°РіСЂСѓР¶РµРЅ
+  calcResults: null,   // массив результатов
+  flakons: [],         // массив флаконов
+  params: null,        // текущие параметры
+  xlsxReady: false,    // SheetJS загружен
   importType: null,    // 'nomenclature' | 'cost' | 'price'
-  importFileData: null, // { headers, rows } РёР· С„Р°Р№Р»Р°
-  tables: {
-    export: null,
-    flakons: null,
-    cost: null
-  }
+  importFileData: null // { headers, rows } из файла
 };
 
-// РќР”РЎ/РџРѕС€Р»РёРЅР°: РѕС‡РµСЂРµРґСЊ РёР·РјРµРЅРµРЅРёР№ РґР»СЏ batch-СЃРѕС…СЂР°РЅРµРЅРёСЏ
+// НДС/Пошлина: очередь изменений для batch-сохранения
 var NDS_TAX_PENDING = {};
 var NDS_TAX_TIMER = null;
 
 // ============================================================
-// РќРђР’РР“РђР¦РРЇ
+// НАВИГАЦИЯ
 // ============================================================
 function showTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
@@ -96,16 +91,16 @@ function detectItemTypeForUI(row) {
   var isSet = String(row && row[11] || '').trim();
   var hasRaw = row && row[7] && String(row[7]).trim() !== '';
 
-  if (isKnownFlakonName(name)) return 'Р¤Р»Р°РєРѕРЅ';
-  if (isSet === 'Р”Р°') return 'РќР°Р±РѕСЂС‹';
-  if (!hasRaw) return 'Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ';
-  return 'РЎС‹СЂСЊС‘';
+  if (isKnownFlakonName(name)) return 'Флакон';
+  if (isSet === 'Да') return 'Наборы';
+  if (!hasRaw) return 'Готовый товар';
+  return 'Сырьё';
 }
 
 function getTypeBadgeClass(type) {
-  if (type === 'РЎС‹СЂСЊС‘') return 'badge-raw';
-  if (type === 'Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ') return 'badge-finished';
-  if (type === 'Р¤Р»Р°РєРѕРЅ') return 'badge-flakon';
+  if (type === 'Сырьё') return 'badge-raw';
+  if (type === 'Готовый товар') return 'badge-finished';
+  if (type === 'Флакон') return 'badge-flakon';
   return 'badge-set';
 }
 
@@ -117,12 +112,12 @@ function loadXLSX(callback) {
   var s = document.createElement('script');
   s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
   s.onload = function() { STATE.xlsxReady = true; callback(); };
-  s.onerror = function() { setStatus('export-status', 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё XLSX Р±РёР±Р»РёРѕС‚РµРєРё. РџСЂРѕРІРµСЂСЊС‚Рµ РёРЅС‚РµСЂРЅРµС‚.', 'error'); };
+  s.onerror = function() { setStatus('export-status', 'Ошибка загрузки XLSX библиотеки. Проверьте интернет.', 'error'); };
   document.head.appendChild(s);
 }
 
 // ============================================================
-// TAB 1 вЂ” IMPORT BUTTONS
+// TAB 1 — IMPORT BUTTONS
 // ============================================================
 function startImport(type) {
   STATE.importType = type;
@@ -138,7 +133,7 @@ function handleImportFileSelected(event) {
   if (!input.files || !input.files[0]) return;
   var file = input.files[0];
   showLoading();
-  setStatus('export-status', 'Р§РёС‚Р°СЋ С„Р°Р№Р» ' + file.name + '...', 'info');
+  setStatus('export-status', 'Читаю файл ' + file.name + '...', 'info');
 
   var reader = new FileReader();
   reader.onload = function(e) {
@@ -150,11 +145,11 @@ function handleImportFileSelected(event) {
       hideLoading();
 
       if (!rows || rows.length < 2) {
-        setStatus('export-status', 'Р¤Р°Р№Р» РїСѓСЃС‚РѕР№ РёР»Рё СЃРѕРґРµСЂР¶РёС‚ РјРµРЅРµРµ 2 СЃС‚СЂРѕРє', 'error');
+        setStatus('export-status', 'Файл пустой или содержит менее 2 строк', 'error');
         return;
       }
 
-      // РќРѕСЂРјР°Р»РёР·РѕРІР°С‚СЊ Р·Р°РіРѕР»РѕРІРєРё
+      // Нормализовать заголовки
       var headers = rows[0].map(function(h) { return String(h || '').trim(); });
       var dataRows = rows.slice(1).filter(function(r) {
         return r.some(function(c) { return String(c || '').trim() !== ''; });
@@ -164,12 +159,12 @@ function handleImportFileSelected(event) {
       showMappingModal(file.name, headers, dataRows.length);
     } catch(err) {
       hideLoading();
-      setStatus('export-status', 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ С„Р°Р№Р»Р°: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка чтения файла: ' + err.message, 'error');
     }
   };
   reader.onerror = function() {
     hideLoading();
-    setStatus('export-status', 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ С„Р°Р№Р»Р°', 'error');
+    setStatus('export-status', 'Ошибка чтения файла', 'error');
   };
   reader.readAsArrayBuffer(file);
 }
@@ -178,25 +173,25 @@ function handleImportFileSelected(event) {
 // MAPPING MODAL
 // ============================================================
 
-// РџРѕР»СЏ РґР»СЏ РёРјРїРѕСЂС‚Р° РЅРѕРјРµРЅРєР»Р°С‚СѓСЂС‹ (14 Р±Р°Р·РѕРІС‹С… РєРѕР»РѕРЅРѕРє)
+// Поля для импорта номенклатуры (14 базовых колонок)
 var NOMENCLATURE_FIELDS = [
-  { key: 'NAME',    label: 'РќРѕРјРµРЅРєР»Р°С‚СѓСЂР° (РЅР°РёРјРµРЅРѕРІР°РЅРёРµ)', required: true,  hints: ['РЅРѕРјРµРЅРєР»Р°С‚СѓСЂР°', 'РЅР°РёРјРµРЅРѕРІР°РЅ', 'РёРјСЏ С‚РѕРІР°СЂР°'] },
-  { key: 'ART',     label: 'РђСЂС‚РёРєСѓР»',                     required: false, hints: ['Р°СЂС‚РёРєСѓР»'] },
-  { key: 'ART_WB',  label: 'РђСЂС‚РёРєСѓР» Р’Р‘',                  required: false, hints: ['РІР±', 'wildberries', 'Р°СЂС‚РёРєСѓР» РІР±'] },
-  { key: 'CAT',     label: 'РљР°С‚РµРіРѕСЂРёСЏ С‚РѕРІР°СЂРѕРІ',            required: false, hints: ['РєР°С‚РµРіРѕСЂ'] },
-  { key: 'VOL',     label: 'РћР±СЉС‘Рј С‚Р°СЂС‹',                   required: false, hints: ['РѕР±СЉРµРј', 'РѕР±СЉС‘Рј', 'С‚Р°СЂ', 'РѕР±СЉ'] },
-  { key: 'GRP2',    label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 2',            required: false, hints: ['РіСЂСѓРїРїР° 2', 'РіСЂСѓРїРїР°2', 'РіСЂСѓРїРїР°.2'] },
-  { key: 'GRP3',    label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 3',            required: false, hints: ['РіСЂСѓРїРїР° 3', 'РіСЂСѓРїРїР°3', 'РіСЂСѓРїРїР°.3'] },
-  { key: 'RAW',     label: 'РћСЃРЅРѕРІРЅРѕРµ СЃС‹СЂСЊС‘',               required: false, hints: ['СЃС‹СЂСЊРµ', 'СЃС‹СЂСЊС‘', 'РѕСЃРЅРѕРІРЅРѕРµ СЃС‹СЂСЊРµ', 'РѕСЃРЅРѕРІРЅ'] },
-  { key: 'FLAKON',  label: 'РўР°СЂР° (С„Р»Р°РєРѕРЅ)',                required: false, hints: ['С‚Р°СЂР°', 'С„Р»Р°РєРѕРЅ'] },
-  { key: 'SET_QTY', label: 'РљРѕР»-РІРѕ РІ РЅР°Р±РѕСЂРµ',              required: false, hints: ['РєРѕР»-РІРѕ', 'РєРѕР»РёС‡РµСЃС‚РІРѕ', 'РЅР°Р±РѕСЂ', 'Р»Р°РєРѕРІ'] },
-  { key: 'ART_MP',  label: 'РђСЂС‚РёРєСѓР» РњРџ',                   required: false, hints: ['Р°СЂС‚РёРєСѓР» РјРї', 'РјРї'] },
-  { key: 'IS_SET',  label: 'Р­С‚Рѕ РЅР°Р±РѕСЂ',                    required: false, hints: ['СЌС‚Рѕ РЅР°Р±РѕСЂ', 'is_set', 'РЅР°Р±РѕСЂ'] },
-  { key: 'WEIGHT',  label: 'Р’РµСЃ (РєРі)',                     required: false, hints: ['РІРµСЃ', 'РјР°СЃСЃР°', 'РёСЃРїРѕР»РЅ'] },
-  { key: 'GRP1',    label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 1',            required: false, hints: ['РіСЂСѓРїРїР° 1', 'РіСЂСѓРїРїР°1', 'РіСЂСѓРїРїР°.1'] }
+  { key: 'NAME',    label: 'Номенклатура (наименование)', required: true,  hints: ['номенклатура', 'наименован', 'имя товара'] },
+  { key: 'ART',     label: 'Артикул',                     required: false, hints: ['артикул'] },
+  { key: 'ART_WB',  label: 'Артикул ВБ',                  required: false, hints: ['вб', 'wildberries', 'артикул вб'] },
+  { key: 'CAT',     label: 'Категория товаров',            required: false, hints: ['категор'] },
+  { key: 'VOL',     label: 'Объём тары',                   required: false, hints: ['объем', 'объём', 'тар', 'объ'] },
+  { key: 'GRP2',    label: 'Товарная группа 2',            required: false, hints: ['группа 2', 'группа2', 'группа.2'] },
+  { key: 'GRP3',    label: 'Товарная группа 3',            required: false, hints: ['группа 3', 'группа3', 'группа.3'] },
+  { key: 'RAW',     label: 'Основное сырьё',               required: false, hints: ['сырье', 'сырьё', 'основное сырье', 'основн'] },
+  { key: 'FLAKON',  label: 'Тара (флакон)',                required: false, hints: ['тара', 'флакон'] },
+  { key: 'SET_QTY', label: 'Кол-во в наборе',              required: false, hints: ['кол-во', 'количество', 'набор', 'лаков'] },
+  { key: 'ART_MP',  label: 'Артикул МП',                   required: false, hints: ['артикул мп', 'мп'] },
+  { key: 'IS_SET',  label: 'Это набор',                    required: false, hints: ['это набор', 'is_set', 'набор'] },
+  { key: 'WEIGHT',  label: 'Вес (кг)',                     required: false, hints: ['вес', 'масса', 'исполн'] },
+  { key: 'GRP1',    label: 'Товарная группа 1',            required: false, hints: ['группа 1', 'группа1', 'группа.1'] }
 ];
 
-// РџРѕСЂСЏРґРѕРє РїРѕР»РµР№ РїСЂРё Р·Р°РїРёСЃРё РІ 1cData
+// Порядок полей при записи в 1cData
 var FIELD_ORDER = ['NAME','ART','ART_WB','CAT','VOL','GRP2','GRP3','RAW','FLAKON','SET_QTY','ART_MP','IS_SET','WEIGHT','GRP1'];
 
 function findBestMatch(hints, headers) {
@@ -215,7 +210,7 @@ function colLabel(idx) {
 }
 
 function makeColOptions(headers, selected) {
-  var opts = '<option value="-1">вЂ” РќРµ РёРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ вЂ”</option>';
+  var opts = '<option value="-1">— Не импортировать —</option>';
   for (var i = 0; i < headers.length; i++) {
     var label = colLabel(i) + ': ' + esc(String(headers[i]).substring(0, 45));
     opts += '<option value="' + i + '"' + (i === selected ? ' selected' : '') + '>' + label + '</option>';
@@ -226,13 +221,13 @@ function makeColOptions(headers, selected) {
 function showMappingModal(fileName, headers, rowCount) {
   var type = STATE.importType;
   var titleMap = {
-    nomenclature: 'РРјРїРѕСЂС‚ РёР· 1РЎ РЅРѕРјРµРЅРєР»Р°С‚СѓСЂС‹',
-    cost:         'РРјРїРѕСЂС‚ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё 1РЎ',
-    supplier:     'РРјРїРѕСЂС‚ С†РµРЅС‹ РїРѕСЃС‚Р°РІС‰РёРєР°'
+    nomenclature: 'Импорт из 1С номенклатуры',
+    cost:         'Импорт себестоимости 1С',
+    supplier:     'Импорт цены поставщика'
   };
-  document.getElementById('import-modal-title').textContent = titleMap[type] || 'РњР°РїРїРёРЅРі СЃС‚РѕР»Р±С†РѕРІ';
+  document.getElementById('import-modal-title').textContent = titleMap[type] || 'Маппинг столбцов';
   document.getElementById('import-modal-subtitle').textContent =
-    fileName + ' В· ' + rowCount + ' СЃС‚СЂРѕРє РґР°РЅРЅС‹С…';
+    fileName + ' · ' + rowCount + ' строк данных';
 
   var rateDefaults = (STATE.importSettings && STATE.importSettings.rateDefaults) || { nds: 0.22, tax: 0.065 };
   var ndsDefault = rateDefaults.nds;
@@ -241,8 +236,8 @@ function showMappingModal(fileName, headers, rowCount) {
   var html = '';
 
   if (type === 'nomenclature') {
-    html += '<p class="mapping-hint" style="margin-bottom:12px">РЎРѕРїРѕСЃС‚Р°РІСЊС‚Рµ СЃС‚РѕР»Р±С†С‹ С„Р°Р№Р»Р° СЃ РїРѕР»СЏРјРё С‚Р°Р±Р»РёС†С‹. РџРѕР»СЏ СЃРѕ * РѕР±СЏР·Р°С‚РµР»СЊРЅС‹.</p>';
-    html += '<div class="mapping-scroll"><table class="mapping-table"><thead><tr><th>РџРѕР»Рµ С‚Р°Р±Р»РёС†С‹</th><th>РЎС‚РѕР»Р±РµС† С„Р°Р№Р»Р°</th></tr></thead><tbody>';
+    html += '<p class="mapping-hint" style="margin-bottom:12px">Сопоставьте столбцы файла с полями таблицы. Поля со * обязательны.</p>';
+    html += '<div class="mapping-scroll"><table class="mapping-table"><thead><tr><th>Поле таблицы</th><th>Столбец файла</th></tr></thead><tbody>';
 
     for (var f = 0; f < NOMENCLATURE_FIELDS.length; f++) {
       var field = NOMENCLATURE_FIELDS[f];
@@ -257,20 +252,20 @@ function showMappingModal(fileName, headers, rowCount) {
 
     html += '</tbody></table></div>';
 
-    // РќР”РЎ/РџРѕС€Р»РёРЅР° defaults
+    // НДС/Пошлина defaults
     html += '<div class="mapping-defaults" style="margin-top:12px">' +
-      '<div class="param-group"><label>РќР”РЎ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</label>' +
+      '<div class="param-group"><label>НДС по умолчанию</label>' +
       '<input type="number" id="modal-nds" step="0.001" value="' + ndsDefault + '" style="width:100px"></div>' +
-      '<div class="param-group"><label>РџРѕС€Р»РёРЅР° РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</label>' +
+      '<div class="param-group"><label>Пошлина по умолчанию</label>' +
       '<input type="number" id="modal-tax" step="0.001" value="' + taxDefault + '" style="width:100px"></div>' +
       '</div>';
 
   } else {
-    // Cost or Supplier: РІС‹Р±СЂР°С‚СЊ 2 СЃС‚РѕР»Р±С†Р°
-    var nameHints = ['РЅРѕРјРµРЅРєР»Р°С‚СѓСЂ', 'РЅР°РёРјРµРЅРѕРІР°РЅ', 'РёРјСЏ'];
+    // Cost or Supplier: выбрать 2 столбца
+    var nameHints = ['номенклатур', 'наименован', 'имя'];
     var valueHints = type === 'cost'
-      ? ['СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ', 'СЃС‚РѕРёРјРѕСЃС‚СЊ', 'cost', 'С†РµРЅР°']
-      : ['С†РµРЅР° РїРѕСЃС‚Р°РІС‰РёРєР°', 'С†РµРЅР°', 'price', 'СЃС‚РѕРёРјРѕСЃС‚СЊ'];
+      ? ['себестоимость', 'стоимость', 'cost', 'цена']
+      : ['цена поставщика', 'цена', 'price', 'стоимость'];
 
     var nameIdx  = findBestMatch(nameHints, headers);
     var valueIdx = findBestMatch(valueHints, headers);
@@ -278,11 +273,11 @@ function showMappingModal(fileName, headers, rowCount) {
     if (valueIdx < 0) valueIdx = Math.min(1, headers.length - 1);
     if (valueIdx === nameIdx && headers.length > 1) valueIdx = nameIdx === 0 ? 1 : 0;
 
-    var valueLabel = type === 'cost' ? 'РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ 1РЎ' : 'Р¦РµРЅР° РїРѕСЃС‚Р°РІС‰РёРєР°';
+    var valueLabel = type === 'cost' ? 'Себестоимость 1С' : 'Цена поставщика';
 
-    html += '<p class="mapping-hint" style="margin-bottom:12px">РЈРєР°Р¶РёС‚Рµ, РІ РєР°РєРёС… СЃС‚РѕР»Р±С†Р°С… РЅР°С…РѕРґСЏС‚СЃСЏ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ Рё Р·РЅР°С‡РµРЅРёРµ.</p>';
-    html += '<table class="mapping-table"><thead><tr><th>РџРѕР»Рµ</th><th>РЎС‚РѕР»Р±РµС† С„Р°Р№Р»Р°</th></tr></thead><tbody>';
-    html += '<tr><td class="map-field-name">РќР°РёРјРµРЅРѕРІР°РЅРёРµ РЅРѕРјРµРЅРєР»Р°С‚СѓСЂС‹ <span class="required">*</span></td>' +
+    html += '<p class="mapping-hint" style="margin-bottom:12px">Укажите, в каких столбцах находятся наименование и значение.</p>';
+    html += '<table class="mapping-table"><thead><tr><th>Поле</th><th>Столбец файла</th></tr></thead><tbody>';
+    html += '<tr><td class="map-field-name">Наименование номенклатуры <span class="required">*</span></td>' +
             '<td><select id="map-NAME" class="mapping-select">' + makeColOptions(headers, nameIdx) + '</select></td></tr>';
     html += '<tr><td class="map-field-name">' + esc(valueLabel) + ' <span class="required">*</span></td>' +
             '<td><select id="map-VALUE" class="mapping-select">' + makeColOptions(headers, valueIdx) + '</select></td></tr>';
@@ -305,7 +300,7 @@ function confirmImport() {
   if (!fd) return;
 
   if (type === 'nomenclature') {
-    // РЎРѕР±СЂР°С‚СЊ РјР°РїРїРёРЅРі
+    // Собрать маппинг
     var mapping = {};
     for (var f = 0; f < NOMENCLATURE_FIELDS.length; f++) {
       var key = NOMENCLATURE_FIELDS[f].key;
@@ -313,14 +308,14 @@ function confirmImport() {
       mapping[key] = sel ? parseInt(sel.value) : -1;
     }
     if (mapping.NAME < 0) {
-      alert('РќРµРѕР±С…РѕРґРёРјРѕ РІС‹Р±СЂР°С‚СЊ СЃС‚РѕР»Р±РµС† СЃ РЅР°РёРјРµРЅРѕРІР°РЅРёРµРј РЅРѕРјРµРЅРєР»Р°С‚СѓСЂС‹.');
+      alert('Необходимо выбрать столбец с наименованием номенклатуры.');
       return;
     }
 
     var nds = parseFloat(document.getElementById('modal-nds').value) || 0.22;
     var tax = parseFloat(document.getElementById('modal-tax').value) || 0.065;
 
-    // РџРѕСЃС‚СЂРѕРёС‚СЊ РјР°СЃСЃРёРІ РґР°РЅРЅС‹С… РІ РїРѕСЂСЏРґРєРµ FIELD_ORDER
+    // Построить массив данных в порядке FIELD_ORDER
     var fieldLabels = FIELD_ORDER.map(function(k) {
       var fi = NOMENCLATURE_FIELDS.filter(function(x){ return x.key === k; })[0];
       return fi ? fi.label : k;
@@ -330,7 +325,7 @@ function confirmImport() {
     for (var i = 0; i < fd.rows.length; i++) {
       var srcRow = fd.rows[i];
       var nameVal = String(srcRow[mapping.NAME] || '').trim();
-      if (!nameVal) continue; // РїСЂРѕРїСѓСЃС‚РёС‚СЊ РїСѓСЃС‚С‹Рµ СЃС‚СЂРѕРєРё
+      if (!nameVal) continue; // пропустить пустые строки
       var dstRow = FIELD_ORDER.map(function(k) {
         var idx = mapping[k];
         return (idx >= 0 && idx < srcRow.length) ? (srcRow[idx] || '') : '';
@@ -339,29 +334,29 @@ function confirmImport() {
     }
 
     if (exportRows.length < 2) {
-      alert('РџРѕСЃР»Рµ С„РёР»СЊС‚СЂР°С†РёРё РЅРµ РѕСЃС‚Р°Р»РѕСЃСЊ РґР°РЅРЅС‹С… РґР»СЏ РёРјРїРѕСЂС‚Р°.');
+      alert('После фильтрации не осталось данных для импорта.');
       return;
     }
 
     closeImportModal();
     showLoading();
-    setStatus('export-status', 'РРјРїРѕСЂС‚РёСЂСѓСЋ РЅРѕРјРµРЅРєР»Р°С‚СѓСЂСѓ (' + (exportRows.length - 1) + ' РїРѕР·РёС†РёР№)...', 'info');
+    setStatus('export-status', 'Импортирую номенклатуру (' + (exportRows.length - 1) + ' позиций)...', 'info');
 
     google.script.run
       .withSuccessHandler(function(res) {
         hideLoading();
-        setStatus('export-status', res.success ? ('вњ“ ' + res.message) : ('вњ— ' + res.message),
+        setStatus('export-status', res.success ? ('✓ ' + res.message) : ('✗ ' + res.message),
                   res.success ? 'success' : 'error');
         if (res.success) loadExportData();
       })
       .withFailureHandler(function(err) {
         hideLoading();
-        setStatus('export-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+        setStatus('export-status', 'Ошибка: ' + err.message, 'error');
       })
       .importNomenclature(exportRows, nds, tax);
 
   } else {
-    // cost РёР»Рё supplier
+    // cost или supplier
     var nameSel  = document.getElementById('map-NAME');
     var valueSel = document.getElementById('map-VALUE');
     if (!nameSel || !valueSel) return;
@@ -369,8 +364,8 @@ function confirmImport() {
     var nameIdx  = parseInt(nameSel.value);
     var valueIdx = parseInt(valueSel.value);
 
-    if (nameIdx < 0) { alert('РЈРєР°Р¶РёС‚Рµ СЃС‚РѕР»Р±РµС† СЃ РЅР°РёРјРµРЅРѕРІР°РЅРёРµРј.'); return; }
-    if (valueIdx < 0) { alert('РЈРєР°Р¶РёС‚Рµ СЃС‚РѕР»Р±РµС† СЃРѕ Р·РЅР°С‡РµРЅРёРµРј.'); return; }
+    if (nameIdx < 0) { alert('Укажите столбец с наименованием.'); return; }
+    if (valueIdx < 0) { alert('Укажите столбец со значением.'); return; }
 
     var mappedData = [];
     for (var i = 0; i < fd.rows.length; i++) {
@@ -382,39 +377,39 @@ function confirmImport() {
     }
 
     if (mappedData.length === 0) {
-      alert('РќРµ РЅР°Р№РґРµРЅРѕ СЃС‚СЂРѕРє СЃ РґР°РЅРЅС‹РјРё (РЅР°РёРјРµРЅРѕРІР°РЅРёРµ + С‡РёСЃР»РѕРІРѕРµ Р·РЅР°С‡РµРЅРёРµ > 0).');
+      alert('Не найдено строк с данными (наименование + числовое значение > 0).');
       return;
     }
 
     closeImportModal();
     showLoading();
-    var label = type === 'cost' ? 'СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё' : 'С†РµРЅС‹ РїРѕСЃС‚Р°РІС‰РёРєР°';
-    setStatus('export-status', 'РРјРїРѕСЂС‚РёСЂСѓСЋ ' + label + ' (' + mappedData.length + ' СЃС‚СЂРѕРє)...', 'info');
+    var label = type === 'cost' ? 'себестоимости' : 'цены поставщика';
+    setStatus('export-status', 'Импортирую ' + label + ' (' + mappedData.length + ' строк)...', 'info');
 
     if (type === 'cost') {
       google.script.run
         .withSuccessHandler(function(res) {
           hideLoading();
-          setStatus('export-status', res.success ? ('вњ“ ' + res.message) : ('вњ— ' + res.message),
+          setStatus('export-status', res.success ? ('✓ ' + res.message) : ('✗ ' + res.message),
                     res.success ? 'success' : 'error');
           if (res.success) loadExportData();
         })
         .withFailureHandler(function(err) {
           hideLoading();
-          setStatus('export-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+          setStatus('export-status', 'Ошибка: ' + err.message, 'error');
         })
         .importCost1C(mappedData);
     } else {
       google.script.run
         .withSuccessHandler(function(res) {
           hideLoading();
-          setStatus('export-status', res.success ? ('вњ“ ' + res.message) : ('вњ— ' + res.message),
+          setStatus('export-status', res.success ? ('✓ ' + res.message) : ('✗ ' + res.message),
                     res.success ? 'success' : 'error');
           if (res.success) loadExportData();
         })
         .withFailureHandler(function(err) {
           hideLoading();
-          setStatus('export-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+          setStatus('export-status', 'Ошибка: ' + err.message, 'error');
         })
         .importSupplierPrice(mappedData);
     }
@@ -422,7 +417,7 @@ function confirmImport() {
 }
 
 // ============================================================
-// РќР”РЎ / РџРћРЁР›РРќРђ вЂ” BATCH SAVE
+// НДС / ПОШЛИНА — BATCH SAVE
 // ============================================================
 function onNdsTaxChange(rowIdx, field, value) {
   if (!NDS_TAX_PENDING[rowIdx]) NDS_TAX_PENDING[rowIdx] = {};
@@ -442,10 +437,10 @@ function flushNdsTaxUpdates() {
 
   google.script.run
     .withSuccessHandler(function() {
-      setStatus('export-status', 'вњ“ РќР”РЎ/РџРѕС€Р»РёРЅР° СЃРѕС…СЂР°РЅРµРЅС‹ (' + updates.length + ' СЃС‚СЂРѕРє)', 'success');
+      setStatus('export-status', '✓ НДС/Пошлина сохранены (' + updates.length + ' строк)', 'success');
     })
     .withFailureHandler(function(err) {
-      setStatus('export-status', 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РќР”РЎ/РџРѕС€Р»РёРЅС‹: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка сохранения НДС/Пошлины: ' + err.message, 'error');
     })
     .updateNdsTax(updates);
 }
@@ -454,16 +449,16 @@ function applyRatesToAllUI() {
   var ndsInput = document.getElementById('bulk-nds');
   var taxInput = document.getElementById('bulk-tax');
   if (!ndsInput || !taxInput) {
-    setStatus('export-status', 'РњР°СЃСЃРѕРІРѕРµ РїСЂРёРјРµРЅРµРЅРёРµ РќР”РЎ Рё РџРѕС€Р»РёРЅС‹ РѕС‚РєР»СЋС‡РµРЅРѕ РІ С‚РµРєСѓС‰РµРј РёРЅС‚РµСЂС„РµР№СЃРµ.', 'info');
+    setStatus('export-status', 'Массовое применение НДС и Пошлины отключено в текущем интерфейсе.', 'info');
     return;
   }
 
   var nds = parseFloat(ndsInput.value);
   var tax = parseFloat(taxInput.value);
-  if (isNaN(nds) || isNaN(tax)) { alert('Р’РІРµРґРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ РќР”РЎ Рё РџРѕС€Р»РёРЅС‹.'); return; }
+  if (isNaN(nds) || isNaN(tax)) { alert('Введите корректные значения НДС и Пошлины.'); return; }
 
   var confirmed = window.confirm(
-    'РџСЂРёРјРµРЅРёС‚СЊ РќР”РЎ=' + (nds * 100).toFixed(1) + '% Рё РџРѕС€Р»РёРЅСѓ=' + (tax * 100).toFixed(1) + '%\nРєРѕ Р’РЎР•Рњ СЃС‚СЂРѕРєР°Рј С‚Р°Р±Р»РёС†С‹?'
+    'Применить НДС=' + (nds * 100).toFixed(1) + '% и Пошлину=' + (tax * 100).toFixed(1) + '%\nко ВСЕМ строкам таблицы?'
   );
   if (!confirmed) return;
 
@@ -472,13 +467,13 @@ function applyRatesToAllUI() {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (res && res.success) {
-        setStatus('export-status', 'вњ“ РќР”РЎ/РџРѕС€Р»РёРЅР° РїСЂРёРјРµРЅРµРЅС‹ Рє ' + res.count + ' СЃС‚СЂРѕРєР°Рј', 'success');
+        setStatus('export-status', '✓ НДС/Пошлина применены к ' + res.count + ' строкам', 'success');
         loadExportData();
       }
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('export-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка: ' + err.message, 'error');
     })
     .updateAllNdsTax(nds, tax);
 }
@@ -488,7 +483,7 @@ function saveRateEditsUI() {
 }
 
 // ============================================================
-// TAB 1 вЂ” RENDER EXPORT TABLE
+// TAB 1 — RENDER EXPORT TABLE
 // ============================================================
 function loadExportData() {
   showLoading();
@@ -501,12 +496,12 @@ function loadExportData() {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('export-status', 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка загрузки: ' + err.message, 'error');
     })
     .getData();
 }
 
-// РРЅРґРµРєСЃС‹ РІ СЃС‚СЂРѕРєРµ РґР°РЅРЅС‹С… (СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓСЋС‚ CFG РІ DataService.js)
+// Индексы в строке данных (соответствуют CFG в DataService.js)
 var EXPORT_NDS_COL = 16;
 var EXPORT_TAX_COL = 17;
 
@@ -517,11 +512,11 @@ function renderExportTable(data) {
   thead.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Р—Р°РіРѕР»РѕРІРєРё вЂ” СЃРѕРєСЂР°С‰С‘РЅРЅС‹Рµ РґР»СЏ РґР»РёРЅРЅС‹С… СЃС‚СЂРѕРє
+  // Заголовки — сокращённые для длинных строк
   for (var h = 0; h < data.headers.length; h++) {
     var th = document.createElement('th');
     var full = String(data.headers[h] || '');
-    th.textContent = full.length > 22 ? full.substring(0, 20) + 'вЂ¦' : full;
+    th.textContent = full.length > 22 ? full.substring(0, 20) + '…' : full;
     th.title = full;
     if (h === EXPORT_NDS_COL || h === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
     thead.appendChild(th);
@@ -542,7 +537,7 @@ function renderExportRows(rows) {
       var td = document.createElement('td');
 
       if (j === EXPORT_NDS_COL || j === EXPORT_TAX_COL) {
-        // Р РµРґР°РєС‚РёСЂСѓРµРјР°СЏ СЏС‡РµР№РєР°
+        // Редактируемая ячейка
         var field = j === EXPORT_NDS_COL ? 'nds' : 'tax';
         var inp = document.createElement('input');
         inp.type = 'number';
@@ -553,7 +548,7 @@ function renderExportRows(rows) {
         inp.setAttribute('data-field', field);
         td.style.background = '#f1f8e9';
         td.style.padding = '2px 6px';
-        // Р—Р°С…РІР°С‚С‹РІР°РµРј РїРµСЂРµРјРµРЅРЅС‹Рµ С‡РµСЂРµР· Р·Р°РјС‹РєР°РЅРёРµ
+        // Захватываем переменные через замыкание
         (function(el, ri, fi) {
           el.addEventListener('change', function() { onNdsTaxChange(ri, fi, this.value); });
         })(inp, i, field);
@@ -591,25 +586,25 @@ function renderExportStats(data) {
   data.rows.forEach(function(row) {
     var isSet = String(row[11] || '').trim();
     var hasRaw = row[7] && String(row[7]).trim() !== '';
-    if (isSet === 'Р”Р°') types.sets++;
+    if (isSet === 'Да') types.sets++;
     else if (!hasRaw) types.finished++;
     else types.raw++;
     if (parseFloat(row[14]) > 0) withCost++;
     if (parseFloat(row[15]) > 0) withPrice++;
   });
   document.getElementById('export-stats').innerHTML =
-    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Р’СЃРµРіРѕ: ' + total + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>РЎС‹СЂСЊС‘: ' + types.raw + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ: ' + types.finished + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>РќР°Р±РѕСЂС‹: ' + types.sets + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Всего: ' + total + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + types.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Готовый товар: ' + types.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + types.sets + '</span>' +
     '<span class="stat-item">|</span>' +
-    '<span class="stat-item">РЎРµР±РµСЃ 1РЎ: <b>' + withCost + '</b></span>' +
-    '<span class="stat-item">Р¦РµРЅР° РїРѕСЃС‚.: <b>' + withPrice + '</b></span>';
+    '<span class="stat-item">Себес 1С: <b>' + withCost + '</b></span>' +
+    '<span class="stat-item">Цена пост.: <b>' + withPrice + '</b></span>';
 }
 
 function exportCSV() {
   if (!STATE.exportData || !STATE.exportData.rows.length) {
-    setStatus('export-status', 'РќРµС‚ РґР°РЅРЅС‹С… РґР»СЏ СЌРєСЃРїРѕСЂС‚Р°', 'error');
+    setStatus('export-status', 'Нет данных для экспорта', 'error');
     return;
   }
   var csv = [STATE.exportData.headers.join(';')];
@@ -624,7 +619,7 @@ function exportCSV() {
 }
 
 // ============================================================
-// TAB 2: РџРђР РђРњР•РўР Р«
+// TAB 2: ПАРАМЕТРЫ
 // ============================================================
 function getNumericInputValue(id, fallback) {
   var el = document.getElementById(id);
@@ -740,10 +735,10 @@ function loadParamsUI() {
   google.script.run
     .withSuccessHandler(function(p) {
       setParamsToUI(p);
-      setStatus('params-status', 'РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РіСЂСѓР¶РµРЅС‹', 'success');
+      setStatus('params-status', 'Параметры загружены', 'success');
     })
     .withFailureHandler(function(err) {
-      setStatus('params-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('params-status', 'Ошибка: ' + err.message, 'error');
     })
     .getParams();
 }
@@ -756,16 +751,16 @@ function saveParamsUI() {
       if (STATE.importSettings) {
         STATE.importSettings.rateDefaults = { nds: p.importNds, tax: p.importTax };
       }
-      setStatus('params-status', 'РџР°СЂР°РјРµС‚СЂС‹ СЃРѕС…СЂР°РЅРµРЅС‹', 'success');
+      setStatus('params-status', 'Параметры сохранены', 'success');
     })
     .withFailureHandler(function(err) {
-      setStatus('params-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('params-status', 'Ошибка: ' + err.message, 'error');
     })
     .saveParams(p);
 }
 
 // ============================================================
-// TAB 3: Р¤Р›РђРљРћРќР«
+// TAB 3: ФЛАКОНЫ
 // ============================================================
 function loadFlakonsUI() {
   showLoading();
@@ -775,13 +770,13 @@ function loadFlakonsUI() {
       STATE.flakons = flakons;
       renderFlakonsTable(flakons);
       var flSel = document.getElementById('calc-flakon');
-      if (flSel) flSel.innerHTML = '<option value="">вЂ” РќРµС‚ вЂ”</option>';
+      if (flSel) flSel.innerHTML = '<option value="">— Нет —</option>';
       populateCalcSelects();
-      setStatus('flakons-status', 'Р—Р°РіСЂСѓР¶РµРЅРѕ ' + flakons.length + ' С„Р»Р°РєРѕРЅРѕРІ', 'success');
+      setStatus('flakons-status', 'Загружено ' + flakons.length + ' флаконов', 'success');
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('flakons-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('flakons-status', 'Ошибка: ' + err.message, 'error');
     })
     .getFlakonList();
 }
@@ -834,11 +829,11 @@ function recalculateFlakonsUI() {
       hideLoading();
       STATE.flakons = res.flakons || data;
       renderFlakonsTable(STATE.flakons);
-      setStatus('flakons-status', 'РџРµСЂРµСЃС‡РёС‚Р°РЅРѕ ' + res.count + ' С„Р»Р°РєРѕРЅРѕРІ', 'success');
+      setStatus('flakons-status', 'Пересчитано ' + res.count + ' флаконов', 'success');
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('flakons-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('flakons-status', 'Ошибка: ' + err.message, 'error');
     })
     .recalculateFlakonData(data);
 }
@@ -851,45 +846,45 @@ function saveFlakonDataUI() {
       hideLoading();
       STATE.flakons = res.flakons || data;
       renderFlakonsTable(STATE.flakons);
-      setStatus('flakons-status', 'РЎРѕС…СЂР°РЅРµРЅРѕ ' + res.count + ' С„Р»Р°РєРѕРЅРѕРІ', 'success');
+      setStatus('flakons-status', 'Сохранено ' + res.count + ' флаконов', 'success');
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('flakons-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('flakons-status', 'Ошибка: ' + err.message, 'error');
     })
     .saveFlakonData(data);
 }
 
 // ============================================================
-// TAB 4: РЎР•Р‘Р•РЎРўРћРРњРћРЎРўР¬
+// TAB 4: СЕБЕСТОИМОСТЬ
 // ============================================================
 var COST_COLUMNS = [
-  { key: 'name', label: 'РќРѕРјРµРЅРєР»Р°С‚СѓСЂР°', numeric: false, filterable: false },
-  { key: 'flakonName', label: 'Р¤Р»Р°РєРѕРЅ', numeric: false, filterable: false },
-  { key: 'category', label: 'РљР°С‚РµРіРѕСЂРёСЏ', numeric: false, filterable: false },
-  { key: 'type', label: 'РўРёРї', numeric: false, filterable: true },
-  { key: 'raw', label: 'РЎС‹СЂСЊС‘', numeric: true, filterable: true },
-  { key: 'taxDuty', label: 'РќР°Р»+РџРѕС€', numeric: true, filterable: true },
-  { key: 'delivery', label: 'Р”РѕСЃС‚Р°РІРєР°', numeric: true, filterable: true },
-  { key: 'rawFl', label: 'Р¦РµРЅР° С„Р».', numeric: true, filterable: true },
-  { key: 'deliveryFl', label: 'Р”РѕСЃС‚. С„Р».', numeric: true, filterable: true },
-  { key: 'taxDutyFl', label: 'РќР”РЎ+РїРѕС€Р». С„Р».', numeric: true, filterable: true },
-  { key: 'label', label: 'Р­С‚РёРєРµС‚РєР°', numeric: true, filterable: true },
-  { key: 'totalFl', label: 'РЎРµР±РµСЃ. С„Р».', numeric: true, filterable: true },
-  { key: 'total', label: 'РРўРћР“Рћ', numeric: true, filterable: true },
-  { key: 'cost1C', label: 'РЎРµР±РµСЃ 1РЎ', numeric: true, filterable: true },
-  { key: 'diff', label: 'Р Р°Р·РЅРёС†Р°', numeric: true, filterable: true },
+  { key: 'name', label: 'Номенклатура', numeric: false, filterable: false },
+  { key: 'flakonName', label: 'Флакон', numeric: false, filterable: false },
+  { key: 'category', label: 'Категория', numeric: false, filterable: false },
+  { key: 'type', label: 'Тип', numeric: false, filterable: true },
+  { key: 'raw', label: 'Сырьё', numeric: true, filterable: true },
+  { key: 'taxDuty', label: 'Нал+Пош', numeric: true, filterable: true },
+  { key: 'delivery', label: 'Доставка', numeric: true, filterable: true },
+  { key: 'rawFl', label: 'Цена фл.', numeric: true, filterable: true },
+  { key: 'deliveryFl', label: 'Дост. фл.', numeric: true, filterable: true },
+  { key: 'taxDutyFl', label: 'НДС+пошл. фл.', numeric: true, filterable: true },
+  { key: 'label', label: 'Этикетка', numeric: true, filterable: true },
+  { key: 'totalFl', label: 'Себес. фл.', numeric: true, filterable: true },
+  { key: 'total', label: 'ИТОГО', numeric: true, filterable: true },
+  { key: 'cost1C', label: 'Себес 1С', numeric: true, filterable: true },
+  { key: 'diff', label: 'Разница', numeric: true, filterable: true },
   { key: 'diffPct', label: '%', numeric: true, filterable: true }
 ];
 
 var COST_SLICER_FIELDS = [
-  { key: 'type', label: 'РўРёРї', numeric: false },
-  { key: 'category', label: 'РљР°С‚РµРіРѕСЂРёСЏ', numeric: false },
-  { key: 'group1', label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 1', numeric: false },
-  { key: 'group2', label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 2', numeric: false },
-  { key: 'group3', label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 3', numeric: false },
-  { key: 'rawName', label: 'РћСЃРЅРѕРІРЅРѕРµ СЃС‹СЂСЊС‘', numeric: false },
-  { key: 'flakonName', label: 'Р¤Р»Р°РєРѕРЅ', numeric: false }
+  { key: 'type', label: 'Тип', numeric: false },
+  { key: 'category', label: 'Категория', numeric: false },
+  { key: 'group1', label: 'Товарная группа 1', numeric: false },
+  { key: 'group2', label: 'Товарная группа 2', numeric: false },
+  { key: 'group3', label: 'Товарная группа 3', numeric: false },
+  { key: 'rawName', label: 'Основное сырьё', numeric: false },
+  { key: 'flakonName', label: 'Флакон', numeric: false }
 ];
 
 STATE.costFilters = STATE.costFilters || {};
@@ -898,19 +893,19 @@ STATE.costSort = STATE.costSort || { key: null, dir: 'asc' };
 function runCalculation() {
   var p = getParamsFromUI();
   showLoading();
-  setStatus('cost-status', 'Р Р°СЃС‡С‘С‚...', 'info');
+  setStatus('cost-status', 'Расчёт...', 'info');
   google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res.success) { setStatus('cost-status', res.message, 'error'); return; }
       STATE.calcResults = res.results;
-      setStatus('cost-status', 'Р Р°СЃСЃС‡РёС‚Р°РЅРѕ ' + res.count + ' РїРѕР·РёС†РёР№', 'success');
+      setStatus('cost-status', 'Рассчитано ' + res.count + ' позиций', 'success');
       renderCostTable(res.results);
       renderCostStats(res.results);
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('cost-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
     })
     .calculateAll(p);
 }
@@ -921,8 +916,8 @@ function renderCostTable(results) {
   for (var i = 0; i < results.length; i++) {
     var r = results[i];
     var diffClass  = r.diff > 0 ? 'diff-pos' : (r.diff < 0 ? 'diff-neg' : 'diff-zero');
-    var badgeClass = r.type === 'РЎС‹СЂСЊС‘' ? 'badge-raw' : (r.type === 'Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ' ? 'badge-finished' : 'badge-set');
-    var pctStr = r.cost1C > 0 ? (r.diffPct * 100).toFixed(1) + '%' : 'вЂ”';
+    var badgeClass = r.type === 'Сырьё' ? 'badge-raw' : (r.type === 'Готовый товар' ? 'badge-finished' : 'badge-set');
+    var pctStr = r.cost1C > 0 ? (r.diffPct * 100).toFixed(1) + '%' : '—';
     var tr = document.createElement('tr');
     tr.setAttribute('data-type', r.type);
     tr.setAttribute('data-name', (r.name || '').toLowerCase());
@@ -959,21 +954,21 @@ function filterCostTable() {
 function renderCostStats(results) {
   var totals = { raw: 0, finished: 0, flakons: 0, sets: 0, totalCost: 0, total1C: 0 };
   results.forEach(function(r) {
-    if (r.type === 'РЎС‹СЂСЊС‘') totals.raw++;
-    else if (r.type === 'Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ') totals.finished++;
-    else if (r.type === 'Р¤Р»Р°РєРѕРЅ') totals.flakons++;
+    if (r.type === 'Сырьё') totals.raw++;
+    else if (r.type === 'Готовый товар') totals.finished++;
+    else if (r.type === 'Флакон') totals.flakons++;
     else totals.sets++;
     totals.totalCost += r.total;
     totals.total1C   += r.cost1C;
   });
   document.getElementById('cost-stats').innerHTML =
-    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>РЎС‹СЂСЊС‘: ' + totals.raw + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Р“РѕС‚.С‚РѕРІР°СЂ: ' + totals.finished + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#0b57d0"></span>Р¤Р»Р°РєРѕРЅС‹: ' + totals.flakons + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>РќР°Р±РѕСЂС‹: ' + totals.sets + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + totals.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Гот.товар: ' + totals.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#0b57d0"></span>Флаконы: ' + totals.flakons + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + totals.sets + '</span>' +
     '<span class="stat-item">|</span>' +
-    '<span class="stat-item">Р Р°СЃС‡С‘С‚: <b>' + fmt(totals.totalCost) + '</b></span>' +
-    '<span class="stat-item">1РЎ: <b>' + fmt(totals.total1C) + '</b></span>';
+    '<span class="stat-item">Расчёт: <b>' + fmt(totals.totalCost) + '</b></span>' +
+    '<span class="stat-item">1С: <b>' + fmt(totals.total1C) + '</b></span>';
 }
 
 function getCostSearchQuery() {
@@ -1008,18 +1003,18 @@ function getCostDisplayValue(result, key) {
     type: true
   };
   if (directTextKeys[key]) return String(result[key] || '');
-  if (key === 'diffPct') return result.cost1C > 0 ? (result.diffPct * 100).toFixed(1) + '%' : 'вЂ”';
+  if (key === 'diffPct') return result.cost1C > 0 ? (result.diffPct * 100).toFixed(1) + '%' : '—';
   return fmt(result[key]);
 }
 
 function getCostFilterValue(result, key) {
   var display = getCostDisplayValue(result, key);
-  return display === 'вЂ”' ? '' : String(display).trim();
+  return display === '—' ? '' : String(display).trim();
 }
 
 function getCostSortIndicator(key) {
-  if (STATE.costSort.key !== key) return ' в†•';
-  return STATE.costSort.dir === 'asc' ? ' в†‘' : ' в†“';
+  if (STATE.costSort.key !== key) return ' ↕';
+  return STATE.costSort.dir === 'asc' ? ' ↑' : ' ↓';
 }
 
 function sanitizeCostFilters() {
@@ -1117,7 +1112,7 @@ function renderCostSlicers() {
 
     var allOpt = document.createElement('option');
     allOpt.value = '';
-    allOpt.textContent = 'Р’СЃРµ Р·РЅР°С‡РµРЅРёСЏ';
+    allOpt.textContent = 'Все значения';
     select.appendChild(allOpt);
 
     for (var j = 0; j < def.options.length; j++) {
@@ -1250,7 +1245,7 @@ function filterCostTable() {
 
 function exportCostExcel() {
   if (!STATE.calcResults || !STATE.calcResults.length) {
-    setStatus('cost-status', 'РЎРЅР°С‡Р°Р»Р° РІС‹РїРѕР»РЅРёС‚Рµ СЂР°СЃС‡С‘С‚', 'error');
+    setStatus('cost-status', 'Сначала выполните расчёт', 'error');
     return;
   }
 
@@ -1274,31 +1269,31 @@ function exportCostExcel() {
 
     var wb = XLSX.utils.book_new();
     var ws = XLSX.utils.aoa_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ');
+    XLSX.utils.book_append_sheet(wb, ws, 'Себестоимость');
     XLSX.writeFile(wb, 'cost_results.xlsx');
   });
 }
 
 function saveResultsUI() {
   if (!STATE.calcResults || STATE.calcResults.length === 0) {
-    setStatus('cost-status', 'РЎРЅР°С‡Р°Р»Р° РІС‹РїРѕР»РЅРёС‚Рµ СЂР°СЃС‡С‘С‚', 'error');
+    setStatus('cost-status', 'Сначала выполните расчёт', 'error');
     return;
   }
   showLoading();
   google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
-      setStatus('cost-status', 'Р—Р°РїРёСЃР°РЅРѕ ' + res.count + ' СЃС‚СЂРѕРє РЅР° Р»РёСЃС‚ "' + res.sheetName + '"', 'success');
+      setStatus('cost-status', 'Записано ' + res.count + ' строк на лист "' + res.sheetName + '"', 'success');
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('cost-status', 'РћС€РёР±РєР°: ' + err.message, 'error');
+      setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
     })
     .saveResults(STATE.calcResults, getParamsFromUI());
 }
 
 // ============================================================
-// TAB 5: РљРђР›Р¬РљРЈР›РЇРўРћР 
+// TAB 5: КАЛЬКУЛЯТОР
 // ============================================================
 function populateCalcSelects() {
   if (!STATE.exportData || !STATE.exportData.rows) return;
@@ -1330,7 +1325,7 @@ function onCalcSelect() {
 
   var isSet  = String(row[11] || '').trim();
   var hasRaw = row[7] && String(row[7]).trim() !== '';
-  var type = isSet === 'Р”Р°' ? 'РќР°Р±РѕСЂС‹' : (!hasRaw ? 'Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ' : 'РЎС‹СЂСЊС‘');
+  var type = isSet === 'Да' ? 'Наборы' : (!hasRaw ? 'Готовый товар' : 'Сырьё');
 
   document.getElementById('calc-type').value    = type;
   document.getElementById('calc-price').value   = parseFloat(row[15]) || 0; // COL.PRICE = 15
@@ -1352,7 +1347,7 @@ function calcManual() {
   var selectedName = selectedRow ? String(selectedRow[0] || '').trim() : '';
   var currentFlakonName = document.getElementById('calc-flakon').value || '';
   var input = {
-    name:       selectedName || currentFlakonName || 'Р СѓС‡РЅРѕР№ СЂР°СЃС‡С‘С‚',
+    name:       selectedName || currentFlakonName || 'Ручной расчёт',
     type:       document.getElementById('calc-type').value,
     price:      parseFloat(document.getElementById('calc-price').value)  || 0,
     volume:     parseFloat(document.getElementById('calc-vol').value)    || 0,
@@ -1381,44 +1376,44 @@ function renderCalcResult(r) {
   var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
   var html =
     '<table>' +
-    '<tr><td>РўРёРї</td><td><b>' + esc(result.type || payload.type || '') + '</b></td></tr>' +
-    '<tr><td>РЎС‹СЂСЊС‘</td><td class="num">' + fmt(result.raw) + '</td></tr>' +
-    '<tr><td>РќР°Р»+РџРѕС€</td><td class="num">' + fmt(result.taxDuty) + '</td></tr>' +
-    '<tr><td>Р”РѕСЃС‚Р°РІРєР°</td><td class="num">' + fmt(result.delivery) + '</td></tr>' +
-    '<tr><td>Р¦РµРЅР° С„Р»Р°РєРѕРЅР° РІ СЂСѓР±.</td><td class="num">' + fmt(result.rawFl) + '</td></tr>' +
-    '<tr><td>Р”РѕСЃС‚Р°РІРєР° С„Р»Р°РєРѕРЅР° РІ СЂСѓР±.</td><td class="num">' + fmt(result.deliveryFl) + '</td></tr>' +
-    '<tr><td>РќР”РЎ+РїРѕС€Р»РёРЅР° С„Р»Р°РєРѕРЅР°</td><td class="num">' + fmt(result.taxDutyFl) + '</td></tr>' +
-    '<tr><td>Р­С‚РёРєРµС‚РєР°</td><td class="num">' + fmt(result.label) + '</td></tr>' +
-    '<tr><td>РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ С„Р»Р°РєРѕРЅР°</td><td class="num">' + fmt(result.totalFl) + '</td></tr>' +
-    '<tr class="total-row"><td>РРўРћР“Рћ</td><td class="num">' + fmt(result.total) + ' в‚Ѕ</td></tr>' +
+    '<tr><td>Тип</td><td><b>' + esc(result.type || payload.type || '') + '</b></td></tr>' +
+    '<tr><td>Сырьё</td><td class="num">' + fmt(result.raw) + '</td></tr>' +
+    '<tr><td>Нал+Пош</td><td class="num">' + fmt(result.taxDuty) + '</td></tr>' +
+    '<tr><td>Доставка</td><td class="num">' + fmt(result.delivery) + '</td></tr>' +
+    '<tr><td>Цена флакона в руб.</td><td class="num">' + fmt(result.rawFl) + '</td></tr>' +
+    '<tr><td>Доставка флакона в руб.</td><td class="num">' + fmt(result.deliveryFl) + '</td></tr>' +
+    '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(result.taxDutyFl) + '</td></tr>' +
+    '<tr><td>Этикетка</td><td class="num">' + fmt(result.label) + '</td></tr>' +
+    '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(result.totalFl) + '</td></tr>' +
+    '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(result.total) + ' ₽</td></tr>' +
     (result.cost1C > 0
-      ? '<tr class="diff-row"><td>РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ 1РЎ</td><td class="num">' + fmt(result.cost1C) + '</td></tr>' +
-        '<tr class="diff-row"><td>Р Р°Р·РЅРёС†Р°</td><td class="num ' + diffClass + '">' +
+      ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(result.cost1C) + '</td></tr>' +
+        '<tr class="diff-row"><td>Разница</td><td class="num ' + diffClass + '">' +
         (result.diff > 0 ? '+' : '') + fmt(result.diff) + ' (' + (result.diffPct * 100).toFixed(1) + '%)</td></tr>'
       : '') +
     '</table>';
   if (payload.params) {
-    html += '<p style="margin:16px 0 12px"><b>Р Р°СЃС€РёС„СЂРѕРІРєР° СЂР°СЃС‡С‘С‚Р°</b> | USD=' + payload.params.usd +
-      ' | RMB=' + payload.params.rmb + ' | Р›РѕРі=' + payload.params.log + ' | РљРѕРј=' + payload.params.com +
-      ' | Р›РѕРі_fl=' + payload.params.logFl + ' | РљРѕРј_fl=' + payload.params.comFl +
-      ' | РќР”РЎ=' + (payload.params.ndsRate * 100).toFixed(1) + '% | РџРѕС€Р»РёРЅР°=' + (payload.params.taxRate * 100).toFixed(1) + '%</p>';
+    html += '<p style="margin:16px 0 12px"><b>Расшифровка расчёта</b> | USD=' + payload.params.usd +
+      ' | RMB=' + payload.params.rmb + ' | Лог=' + payload.params.log + ' | Ком=' + payload.params.com +
+      ' | Лог_fl=' + payload.params.logFl + ' | Ком_fl=' + payload.params.comFl +
+      ' | НДС=' + (payload.params.ndsRate * 100).toFixed(1) + '% | Пошлина=' + (payload.params.taxRate * 100).toFixed(1) + '%</p>';
   }
   for (var i = 0; i < (payload.steps || []).length; i++) {
     var step = payload.steps[i];
     var cls = 'verify-step';
-    if (step.title === 'РРўРћР“Рћ') cls += ' step-total';
-    if (step.title.indexOf('РЎСЂР°РІРЅРµРЅРёРµ') >= 0) cls += ' step-diff';
+    if (step.title === 'ИТОГО') cls += ' step-total';
+    if (step.title.indexOf('Сравнение') >= 0) cls += ' step-diff';
     html += '<div class="' + cls + '">';
     html += '<div class="step-title">' + (i + 1) + '. ' + esc(step.title) + '</div>';
     if (step.formula) html += '<div class="step-formula">' + esc(step.formula) + '</div>';
-    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'РРўРћР“Рћ' ? ' в‚Ѕ' : '') + '</div>';
+    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'ИТОГО' ? ' ₽' : '') + '</div>';
     html += '</div>';
   }
   el.innerHTML = html;
 }
 
 // ============================================================
-// TAB 6: РџР РћР’Р•Р РљРђ
+// TAB 6: ПРОВЕРКА
 // ============================================================
 function populateVerifySelect() {
   if (!STATE.exportData || !STATE.exportData.rows) return;
@@ -1455,32 +1450,32 @@ function runVerification() {
 
 function renderVerification(data) {
   var html = '<h3>' + esc(data.name) + '</h3>';
-  html += '<p style="margin-bottom:16px">РўРёРї: <b>' + esc(data.type) + '</b> | USD=' + data.params.usd +
-          ' | RMB=' + data.params.rmb + ' | Р›РѕРі=' + data.params.log + ' | РљРѕРј=' + data.params.com +
-          ' | Р›РѕРі_fl=' + data.params.logFl + ' | РљРѕРј_fl=' + data.params.comFl +
-          ' | РќР”РЎ=' + (data.params.ndsRate*100).toFixed(1) + '% | РџРѕС€Р»РёРЅР°=' + (data.params.taxRate*100).toFixed(1) + '%</p>';
+  html += '<p style="margin-bottom:16px">Тип: <b>' + esc(data.type) + '</b> | USD=' + data.params.usd +
+          ' | RMB=' + data.params.rmb + ' | Лог=' + data.params.log + ' | Ком=' + data.params.com +
+          ' | Лог_fl=' + data.params.logFl + ' | Ком_fl=' + data.params.comFl +
+          ' | НДС=' + (data.params.ndsRate*100).toFixed(1) + '% | Пошлина=' + (data.params.taxRate*100).toFixed(1) + '%</p>';
 
   for (var i = 0; i < data.steps.length; i++) {
     var step = data.steps[i];
     var cls = 'verify-step';
-    if (step.title === 'РРўРћР“Рћ') cls += ' step-total';
-    if (step.title.indexOf('РЎСЂР°РІРЅРµРЅРёРµ') >= 0) cls += ' step-diff';
+    if (step.title === 'ИТОГО') cls += ' step-total';
+    if (step.title.indexOf('Сравнение') >= 0) cls += ' step-diff';
     html += '<div class="' + cls + '">';
     html += '<div class="step-title">' + (i + 1) + '. ' + esc(step.title) + '</div>';
     if (step.formula) html += '<div class="step-formula">' + esc(step.formula) + '</div>';
-    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'РРўРћР“Рћ' ? ' в‚Ѕ' : '') + '</div>';
+    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'ИТОГО' ? ' ₽' : '') + '</div>';
     html += '</div>';
   }
   document.getElementById('verify-output').innerHTML = html;
 }
 
 // ============================================================
-// РЈРўРР›РРўР«
+// УТИЛИТЫ
 // ============================================================
 function fmt(n) {
-  if (n === null || n === undefined || n === '') return 'вЂ”';
+  if (n === null || n === undefined || n === '') return '—';
   var num = parseFloat(n);
-  if (isNaN(num)) return 'вЂ”';
+  if (isNaN(num)) return '—';
   return num.toFixed(2);
 }
 
@@ -1492,7 +1487,7 @@ function esc(s) {
 }
 
 // ============================================================
-// РРќРР¦РРђР›РР—РђР¦РРЇ
+// ИНИЦИАЛИЗАЦИЯ
 // ============================================================
 window.addEventListener('load', function() {
   loadExportData();
@@ -1504,44 +1499,44 @@ window.addEventListener('load', function() {
 // ============================================================
 var IMPORT_CFG_V2 = {
   nomenclature: {
-    title: 'РРјРїРѕСЂС‚ РёР· 1РЎ РЅРѕРјРµРЅРєР»Р°С‚СѓСЂС‹',
+    title: 'Импорт из 1С номенклатуры',
     endpoint: 'importBaseNomenclature',
     needsRates: true,
     fields: [
-      { key: 'name', label: 'РќРѕРјРµРЅРєР»Р°С‚СѓСЂР°.РќР°РёРјРµРЅРѕРІР°РЅРёРµ', required: true, hints: ['РЅРѕРјРµРЅРєР»Р°С‚СѓСЂР°.РЅР°РёРјРµРЅРѕРІР°РЅРёРµ', 'РЅРѕРјРµРЅРєР»Р°С‚СѓСЂР°', 'РЅР°РёРјРµРЅРѕРІР°РЅРёРµ'] },
-      { key: 'article', label: 'РђСЂС‚РёРєСѓР»', required: false, hints: ['Р°СЂС‚РёРєСѓР»'] },
-      { key: 'articleWb', label: 'РђСЂС‚РёРєСѓР» Р’Р‘', required: false, hints: ['Р°СЂС‚РёРєСѓР» РІР±', 'РІР±', 'wildberries'] },
-      { key: 'category', label: 'РљР°С‚РµРіРѕСЂРёСЏ С‚РѕРІР°СЂРѕРІ', required: false, hints: ['РєР°С‚РµРіРѕСЂРёСЏ'] },
-      { key: 'volume', label: 'РћР±СЉРµРј С‚Р°СЂС‹', required: false, hints: ['РѕР±СЉРµРј', 'РѕР±СЉС‘Рј', 'С‚Р°СЂС‹'] },
-      { key: 'group2', label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 2', required: false, hints: ['РіСЂСѓРїРїР° 2', 'С‚РѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 2'] },
-      { key: 'group3', label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 3', required: false, hints: ['РіСЂСѓРїРїР° 3', 'С‚РѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 3'] },
-      { key: 'raw', label: 'РћСЃРЅРѕРІРЅРѕРµ СЃС‹СЂСЊС‘', required: false, hints: ['РѕСЃРЅРѕРІРЅРѕРµ СЃС‹СЂСЊРµ', 'РѕСЃРЅРѕРІРЅРѕРµ СЃС‹СЂСЊС‘', 'СЃС‹СЂСЊРµ', 'СЃС‹СЂСЊС‘'] },
-      { key: 'flakon', label: 'РўР°СЂР° (С„Р»Р°РєРѕРЅ)', required: false, hints: ['С‚Р°СЂР°', 'С„Р»Р°РєРѕРЅ'] },
-      { key: 'setQty', label: 'РљРѕР»РёС‡РµСЃС‚РІРѕ РІ РЅР°Р±РѕСЂРµ', required: false, hints: ['РєРѕР»РёС‡РµСЃС‚РІРѕ', 'РЅР°Р±РѕСЂРµ', 'Р»Р°РєРѕРІ РІ РЅР°Р±РѕСЂРµ'] },
-      { key: 'articleMp', label: 'РђСЂС‚РёРєСѓР» РњРџ', required: false, hints: ['Р°СЂС‚РёРєСѓР» РјРї', 'РјРї'] },
-      { key: 'isSet', label: 'Р­С‚Рѕ РЅР°Р±РѕСЂ', required: false, hints: ['СЌС‚Рѕ РЅР°Р±РѕСЂ', 'РЅР°Р±РѕСЂ'] },
-      { key: 'weight', label: 'Р’РµСЃ (С‡РёСЃР»РёС‚РµР»СЊ)', required: false, hints: ['РІРµСЃ'] },
-      { key: 'group1', label: 'РўРѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 1', required: false, hints: ['РіСЂСѓРїРїР° 1', 'С‚РѕРІР°СЂРЅР°СЏ РіСЂСѓРїРїР° 1'] }
+      { key: 'name', label: 'Номенклатура.Наименование', required: true, hints: ['номенклатура.наименование', 'номенклатура', 'наименование'] },
+      { key: 'article', label: 'Артикул', required: false, hints: ['артикул'] },
+      { key: 'articleWb', label: 'Артикул ВБ', required: false, hints: ['артикул вб', 'вб', 'wildberries'] },
+      { key: 'category', label: 'Категория товаров', required: false, hints: ['категория'] },
+      { key: 'volume', label: 'Объем тары', required: false, hints: ['объем', 'объём', 'тары'] },
+      { key: 'group2', label: 'Товарная группа 2', required: false, hints: ['группа 2', 'товарная группа 2'] },
+      { key: 'group3', label: 'Товарная группа 3', required: false, hints: ['группа 3', 'товарная группа 3'] },
+      { key: 'raw', label: 'Основное сырьё', required: false, hints: ['основное сырье', 'основное сырьё', 'сырье', 'сырьё'] },
+      { key: 'flakon', label: 'Тара (флакон)', required: false, hints: ['тара', 'флакон'] },
+      { key: 'setQty', label: 'Количество в наборе', required: false, hints: ['количество', 'наборе', 'лаков в наборе'] },
+      { key: 'articleMp', label: 'Артикул МП', required: false, hints: ['артикул мп', 'мп'] },
+      { key: 'isSet', label: 'Это набор', required: false, hints: ['это набор', 'набор'] },
+      { key: 'weight', label: 'Вес (числитель)', required: false, hints: ['вес'] },
+      { key: 'group1', label: 'Товарная группа 1', required: false, hints: ['группа 1', 'товарная группа 1'] }
     ]
   },
   cost: {
-    title: 'РРјРїРѕСЂС‚ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё С‚РµРєСѓС‰РµР№',
+    title: 'Импорт себестоимости текущей',
     endpoint: 'importCurrentCost',
     needsRates: false,
     fields: [
-      { key: 'name', label: 'РќРѕРјРµРЅРєР»Р°С‚СѓСЂР° (РґР»СЏ СЃРѕРїРѕСЃС‚Р°РІР»РµРЅРёСЏ)', required: false, hints: ['РЅРѕРјРµРЅРєР»Р°С‚СѓСЂР°', 'РЅР°РёРјРµРЅРѕРІР°РЅРёРµ'] },
-      { key: 'article', label: 'РђСЂС‚РёРєСѓР» (СЂРµР·РµСЂРІРЅС‹Р№ РјР°С‚С‡РёРЅРі)', required: false, hints: ['Р°СЂС‚РёРєСѓР»'] },
-      { key: 'value', label: 'РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ 1РЎ', required: true, hints: ['СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ', 'СЃРµР±РµСЃ', 'СЃС‚РѕРёРјРѕСЃС‚СЊ'] }
+      { key: 'name', label: 'Номенклатура (для сопоставления)', required: false, hints: ['номенклатура', 'наименование'] },
+      { key: 'article', label: 'Артикул (резервный матчинг)', required: false, hints: ['артикул'] },
+      { key: 'value', label: 'Себестоимость 1С', required: true, hints: ['себестоимость', 'себес', 'стоимость'] }
     ]
   },
   supplier: {
-    title: 'РРјРїРѕСЂС‚ С†РµРЅС‹ РїРѕСЃС‚Р°РІС‰РёРєР°',
+    title: 'Импорт цены поставщика',
     endpoint: 'importSupplierPriceData',
     needsRates: false,
     fields: [
-      { key: 'name', label: 'РќРѕРјРµРЅРєР»Р°С‚СѓСЂР° (РґР»СЏ СЃРѕРїРѕСЃС‚Р°РІР»РµРЅРёСЏ)', required: false, hints: ['РЅРѕРјРµРЅРєР»Р°С‚СѓСЂР°', 'РЅР°РёРјРµРЅРѕРІР°РЅРёРµ'] },
-      { key: 'article', label: 'РђСЂС‚РёРєСѓР» (СЂРµР·РµСЂРІРЅС‹Р№ РјР°С‚С‡РёРЅРі)', required: false, hints: ['Р°СЂС‚РёРєСѓР»'] },
-      { key: 'value', label: 'Р¦РµРЅР° РїРѕСЃС‚Р°РІС‰РёРєР°', required: true, hints: ['С†РµРЅР° РїРѕСЃС‚Р°РІС‰РёРєР°', 'С†РµРЅР°', 'price'] }
+      { key: 'name', label: 'Номенклатура (для сопоставления)', required: false, hints: ['номенклатура', 'наименование'] },
+      { key: 'article', label: 'Артикул (резервный матчинг)', required: false, hints: ['артикул'] },
+      { key: 'value', label: 'Цена поставщика', required: true, hints: ['цена поставщика', 'цена', 'price'] }
     ]
   }
 };
@@ -1567,7 +1562,7 @@ function ensureImportSettings(callback) {
         mappings: { nomenclature: null, cost: null, supplier: null },
         rateDefaults: { nds: 0.22, tax: 0.065 }
       };
-      setStatus('export-status', 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РёРјРїРѕСЂС‚Р°: ' + err.message, 'error');
+      setStatus('export-status', 'Не удалось загрузить настройки импорта: ' + err.message, 'error');
       if (callback) callback();
     })
     .getImportSettings();
@@ -1615,11 +1610,11 @@ function toNumberSafe(value, fallback) {
 function startImport(type) {
   ensureImportSettings(function() {
     if (!IMPORT_CFG_V2[type]) {
-      setStatus('export-status', 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ С‚РёРї РёРјРїРѕСЂС‚Р°.', 'error');
+      setStatus('export-status', 'Неизвестный тип импорта.', 'error');
       return;
     }
     if (typeof XLSX === 'undefined') {
-      setStatus('export-status', 'SheetJS РЅРµ РЅР°Р№РґРµРЅ. РџСЂРѕРІРµСЂСЊС‚Рµ SheetJsLib.html.', 'error');
+      setStatus('export-status', 'SheetJS не найден. Проверьте SheetJsLib.html.', 'error');
       return;
     }
 
@@ -1652,7 +1647,7 @@ function handleImportFileSelected(event) {
   var file = input.files[0];
 
   showLoading();
-  setStatus('export-status', 'Р§РёС‚Р°СЋ С„Р°Р№Р»: ' + file.name + '...', 'info');
+  setStatus('export-status', 'Читаю файл: ' + file.name + '...', 'info');
 
   var reader = new FileReader();
   reader.onload = function(e) {
@@ -1664,7 +1659,7 @@ function handleImportFileSelected(event) {
         codepage: 1251
       });
       if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
-        throw new Error('Р’ С„Р°Р№Р»Рµ РЅРµ РЅР°Р№РґРµРЅРѕ Р»РёСЃС‚РѕРІ.');
+        throw new Error('В файле не найдено листов.');
       }
 
       STATE.importCtx.workbook = wb;
@@ -1685,12 +1680,12 @@ function handleImportFileSelected(event) {
       hideLoading();
     } catch (err) {
       hideLoading();
-      setStatus('export-status', 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ С„Р°Р№Р»Р°: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка чтения файла: ' + err.message, 'error');
     }
   };
   reader.onerror = function() {
     hideLoading();
-    setStatus('export-status', 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ С„Р°Р№Р»Р°.', 'error');
+    setStatus('export-status', 'Ошибка чтения файла.', 'error');
   };
   reader.readAsArrayBuffer(file);
 }
@@ -1745,7 +1740,7 @@ function refreshImportPreview() {
   var rawHeaders = rows[headerIdx] || [];
   var headers = [];
   for (var i = 0; i < rawHeaders.length; i++) {
-    headers.push(String(rawHeaders[i] || '').trim() || ('РљРѕР»РѕРЅРєР° ' + colLabelV2(i)));
+    headers.push(String(rawHeaders[i] || '').trim() || ('Колонка ' + colLabelV2(i)));
   }
   STATE.importCtx.headers = headers;
   STATE.importCtx.dataRows = rows.slice(STATE.importCtx.headerRow).filter(function(row) {
@@ -1761,8 +1756,8 @@ function refreshImportPreview() {
   renderImportPreviewV2();
 
   document.getElementById('import-modal-subtitle').textContent =
-    'Р¤Р°Р№Р»: ' + STATE.importCtx.fileName + ' В· Р›РёСЃС‚: ' + STATE.importCtx.sheetName +
-    ' В· РЎС‚СЂРѕРє РґР°РЅРЅС‹С…: ' + STATE.importCtx.dataRows.length;
+    'Файл: ' + STATE.importCtx.fileName + ' · Лист: ' + STATE.importCtx.sheetName +
+    ' · Строк данных: ' + STATE.importCtx.dataRows.length;
 }
 
 function buildMappingV2() {
@@ -1818,9 +1813,9 @@ function renderMappingControlsV2() {
     var field = cfg.fields[i];
     html += '<div class="mapping-row">';
     html += '<div><div class="mapping-label' + (field.required ? ' required' : '') + '">' + esc(field.label) + '</div>';
-    html += '<div class="mapping-hint">РЎРѕРїРѕСЃС‚Р°РІР»РµРЅРёРµ РєРѕР»РѕРЅРєРё С„Р°Р№Р»Р°</div></div>';
+    html += '<div class="mapping-hint">Сопоставление колонки файла</div></div>';
     html += '<select id="map-' + field.key + '" class="mapping-select" onchange="onMappingChangedV2(\'' + field.key + '\', this.value)">';
-    html += '<option value="-1">вЂ” РќРµ РёРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ вЂ”</option>';
+    html += '<option value="-1">— Не импортировать —</option>';
     for (var j = 0; j < headers.length; j++) {
       var selected = STATE.importCtx.mapping[field.key] === j ? ' selected' : '';
       html += '<option value="' + j + '"' + selected + '>' + colLabelV2(j) + ': ' + esc(headers[j]) + '</option>';
@@ -1866,7 +1861,7 @@ function renderImportPreviewV2() {
     var trEmpty = document.createElement('tr');
     var tdEmpty = document.createElement('td');
     tdEmpty.colSpan = Math.max(headers.length, 1);
-    tdEmpty.textContent = 'РќРµС‚ СЃС‚СЂРѕРє РґР°РЅРЅС‹С… РґР»СЏ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂР°.';
+    tdEmpty.textContent = 'Нет строк данных для предпросмотра.';
     trEmpty.appendChild(tdEmpty);
     tbody.appendChild(trEmpty);
     return;
@@ -1897,14 +1892,14 @@ function confirmImport() {
 
   for (var req = 0; req < cfg.fields.length; req++) {
     if (cfg.fields[req].required && !isValidIndexV2(mapping[cfg.fields[req].key], STATE.importCtx.headers.length)) {
-      alert('РќРµ Р·Р°РїРѕР»РЅРµРЅРѕ РѕР±СЏР·Р°С‚РµР»СЊРЅРѕРµ РїРѕР»Рµ: ' + cfg.fields[req].label);
+      alert('Не заполнено обязательное поле: ' + cfg.fields[req].label);
       return;
     }
   }
   if ((STATE.importCtx.type === 'cost' || STATE.importCtx.type === 'supplier') &&
       !isValidIndexV2(mapping.name, STATE.importCtx.headers.length) &&
       !isValidIndexV2(mapping.article, STATE.importCtx.headers.length)) {
-    alert('Р”Р»СЏ СЃРѕРїРѕСЃС‚Р°РІР»РµРЅРёСЏ СѓРєР°Р¶РёС‚Рµ РєРѕР»РѕРЅРєСѓ РќРѕРјРµРЅРєР»Р°С‚СѓСЂР° РёР»Рё РђСЂС‚РёРєСѓР».');
+    alert('Для сопоставления укажите колонку Номенклатура или Артикул.');
     return;
   }
 
@@ -1923,7 +1918,7 @@ function confirmImport() {
       rows.push(item);
     }
     if (!rows.length) {
-      alert('РџРѕСЃР»Рµ С„РёР»СЊС‚СЂР°С†РёРё РЅРµ РѕСЃС‚Р°Р»РѕСЃСЊ СЃС‚СЂРѕРє СЃ РЅРѕРјРµРЅРєР»Р°С‚СѓСЂРѕР№.');
+      alert('После фильтрации не осталось строк с номенклатурой.');
       return;
     }
     payload = {
@@ -1946,7 +1941,7 @@ function confirmImport() {
       mappedRows.push({ name: name, article: article, value: value });
     }
     if (!mappedRows.length) {
-      alert('РќРµ РЅР°Р№РґРµРЅРѕ РІР°Р»РёРґРЅС‹С… СЃС‚СЂРѕРє РґР»СЏ РёРјРїРѕСЂС‚Р°.');
+      alert('Не найдено валидных строк для импорта.');
       return;
     }
     payload = {
@@ -1957,13 +1952,13 @@ function confirmImport() {
 
   closeImportModal();
   showLoading();
-  setStatus('export-status', 'РРјРїРѕСЂС‚РёСЂСѓСЋ РґР°РЅРЅС‹Рµ...', 'info');
+  setStatus('export-status', 'Импортирую данные...', 'info');
 
   var runner = google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('export-status', (res && res.message) || 'РРјРїРѕСЂС‚ Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№.', 'error');
+        setStatus('export-status', (res && res.message) || 'Импорт завершился с ошибкой.', 'error');
         return;
       }
       STATE.importSettings = STATE.importSettings || { mappings: {}, rateDefaults: { nds: 0.22, tax: 0.065 } };
@@ -1973,14 +1968,14 @@ function confirmImport() {
       }
       var details = '';
       if (res.matchedByName !== undefined || res.matchedByArticle !== undefined) {
-        details = ' (РїРѕ РЅР°РёРјРµРЅРѕРІР°РЅРёСЋ: ' + (res.matchedByName || 0) + ', РїРѕ Р°СЂС‚РёРєСѓР»Сѓ: ' + (res.matchedByArticle || 0) + ')';
+        details = ' (по наименованию: ' + (res.matchedByName || 0) + ', по артикулу: ' + (res.matchedByArticle || 0) + ')';
       }
       setStatus('export-status', res.message + details, 'success');
       loadExportData();
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('export-status', 'РћС€РёР±РєР° РёРјРїРѕСЂС‚Р°: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка импорта: ' + err.message, 'error');
     });
 
   if (cfg.endpoint === 'importBaseNomenclature') runner.importBaseNomenclature(payload);
@@ -2026,7 +2021,7 @@ function onCalcSelect() {
   if (!row) return;
 
   var type = detectItemTypeForUI(row);
-  var flakonName = type === 'Р¤Р»Р°РєРѕРЅ' ? String(row[0] || '').trim() : String(row[8] || '').trim();
+  var flakonName = type === 'Флакон' ? String(row[0] || '').trim() : String(row[8] || '').trim();
 
   document.getElementById('calc-type').value = type;
   document.getElementById('calc-price').value = parseFloat(row[15]) || 0;
@@ -2057,17 +2052,17 @@ var EXPORT_STICKY_COLS = 4;
 var EXPORT_PRICE_COL = 15;
 var EXPORT_PRIORITY_ORDER = [0, 1, 2, 3, 13, 14, 15, 16, 17];
 var EXPORT_SLICER_EXCLUDED = {
-  0: true,   // РќРѕРјРµРЅРєР»Р°С‚СѓСЂР°
-  1: true,   // РђСЂС‚РёРєСѓР»
-  2: true,   // РђСЂС‚РёРєСѓР» Р’Р‘
-  15: true   // Р¦РµРЅР° РїРѕСЃС‚Р°РІС‰РёРєР°
+  0: true,   // Номенклатура
+  1: true,   // Артикул
+  2: true,   // Артикул ВБ
+  15: true   // Цена поставщика
 };
 var EXPORT_NUMERIC_COLS = {
-  4: true,   // РћР±СЉРµРј С‚Р°СЂС‹
-  9: true,   // РљРѕР»РёС‡РµСЃС‚РІРѕ РІ РЅР°Р±РѕСЂРµ
-  12: true,  // Р’РµСЃ
-  14: true,  // РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ 1РЎ
-  15: true   // Р¦РµРЅР° РїРѕСЃС‚Р°РІС‰РёРєР°
+  4: true,   // Объем тары
+  9: true,   // Количество в наборе
+  12: true,  // Вес
+  14: true,  // Себестоимость 1С
+  15: true   // Цена поставщика
 };
 
 STATE.exportFilters = STATE.exportFilters || {};
@@ -2138,8 +2133,8 @@ function getExportSearchHaystackV3(row) {
 }
 
 function getSortIndicatorV3(sourceCol) {
-  if (STATE.exportSort.sourceCol !== sourceCol) return ' в†•';
-  return STATE.exportSort.dir === 'asc' ? ' в†‘' : ' в†“';
+  if (STATE.exportSort.sourceCol !== sourceCol) return ' ↕';
+  return STATE.exportSort.dir === 'asc' ? ' ↑' : ' ↓';
 }
 
 function applyExportStickyColumnsV3() {
@@ -2281,7 +2276,7 @@ function renderExportSlicersV3(data) {
 
     var allOpt = document.createElement('option');
     allOpt.value = '';
-    allOpt.textContent = 'Р’СЃРµ Р·РЅР°С‡РµРЅРёСЏ';
+    allOpt.textContent = 'Все значения';
     select.appendChild(allOpt);
 
     for (var j = 0; j < def.options.length; j++) {
@@ -2460,7 +2455,7 @@ function renderExportStats(data) {
     var row = data.rows[i];
     var isSet = normalizeExportValueV3(row[11]);
     var hasRaw = normalizeExportValueV3(row[7]) !== '';
-    if (isSet === 'Р”Р°') types.sets++;
+    if (isSet === 'Да') types.sets++;
     else if (!hasRaw) types.finished++;
     else types.raw++;
     if (parseNumberV2(row[14]) !== null && parseNumberV2(row[14]) > 0) withCost++;
@@ -2468,18 +2463,18 @@ function renderExportStats(data) {
   }
 
   document.getElementById('export-stats').innerHTML =
-    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Р’СЃРµРіРѕ: ' + total + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>РЎС‹СЂСЊС‘: ' + types.raw + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Р“РѕС‚РѕРІС‹Р№ С‚РѕРІР°СЂ: ' + types.finished + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>РќР°Р±РѕСЂС‹: ' + types.sets + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Всего: ' + total + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + types.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Готовый товар: ' + types.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + types.sets + '</span>' +
     '<span class="stat-item">|</span>' +
-    '<span class="stat-item">РЎРµР±РµСЃ 1РЎ: <b>' + withCost + '</b></span>' +
-    '<span class="stat-item">Р¦РµРЅР° РїРѕСЃС‚.: <b>' + withPrice + '</b></span>';
+    '<span class="stat-item">Себес 1С: <b>' + withCost + '</b></span>' +
+    '<span class="stat-item">Цена пост.: <b>' + withPrice + '</b></span>';
 }
 
 function exportCSV() {
   if (!STATE.exportData || !STATE.exportData.rows || !STATE.exportData.rows.length) {
-    setStatus('export-status', 'РќРµС‚ РґР°РЅРЅС‹С… РґР»СЏ СЌРєСЃРїРѕСЂС‚Р°', 'error');
+    setStatus('export-status', 'Нет данных для экспорта', 'error');
     return;
   }
 
@@ -2523,594 +2518,15 @@ function flushNdsTaxUpdates() {
     .withSuccessHandler(function() {
       var inputs = document.querySelectorAll('.nds-tax-input.dirty');
       for (var i = 0; i < inputs.length; i++) inputs[i].classList.remove('dirty');
-      setStatus('export-status', 'вњ“ Р СѓС‡РЅС‹Рµ РїСЂР°РІРєРё С‚Р°Р±Р»РёС†С‹ СЃРѕС…СЂР°РЅРµРЅС‹ (' + updates.length + ' СЃС‚СЂРѕРє)', 'success');
+      setStatus('export-status', '✓ Ручные правки таблицы сохранены (' + updates.length + ' строк)', 'success');
     })
     .withFailureHandler(function(err) {
-      setStatus('export-status', 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ СЂСѓС‡РЅС‹С… РїСЂР°РІРѕРє: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка сохранения ручных правок: ' + err.message, 'error');
     })
     .updateImportRows(updates);
 }
 
-// ============================================================
-// TABULATOR GRID LAYER
-// ============================================================
-function hasTabulator_() {
-  return typeof Tabulator !== 'undefined';
-}
-
-function destroyTable_(key) {
-  if (STATE.tables && STATE.tables[key] && typeof STATE.tables[key].destroy === 'function') {
-    STATE.tables[key].destroy();
-  }
-  if (STATE.tables) STATE.tables[key] = null;
-}
-
-function redrawTable_(key) {
-  if (STATE.tables && STATE.tables[key] && typeof STATE.tables[key].redraw === 'function') {
-    STATE.tables[key].redraw(true);
-  }
-}
-
-function redrawTabulatorForTab_(tabId) {
-  if (tabId === 'export') redrawTable_('export');
-  if (tabId === 'flakons') redrawTable_('flakons');
-  if (tabId === 'cost') redrawTable_('cost');
-}
-
-var showTabBase_ = showTab;
-showTab = function(tabId) {
-  showTabBase_(tabId);
-  setTimeout(function() {
-    redrawTabulatorForTab_(tabId);
-  }, 0);
-};
-
-function numberEditorFactory_(step, className) {
-  return function(cell, onRendered, success, cancel) {
-    var input = document.createElement('input');
-    input.type = 'number';
-    input.step = step || '0.01';
-    input.className = className || '';
-    input.value = cell.getValue() === null || cell.getValue() === undefined ? '' : String(cell.getValue());
-
-    onRendered(function() {
-      input.focus();
-      input.select();
-    });
-
-    function commit() {
-      success(input.value === '' ? '' : input.value);
-    }
-
-    input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') commit();
-      else if (e.key === 'Escape') cancel();
-    });
-    input.addEventListener('blur', commit);
-    return input;
-  };
-}
-
-function formatNumberCell_(cell, bold) {
-  var value = cell.getValue();
-  var parsed = parseNumberV2(value);
-  var el = cell.getElement();
-  el.classList.add('num-cell');
-  el.classList.remove('zero-value');
-  if (parsed === null) return esc(normalizeExportValueV3(value));
-  if (parsed === 0) el.classList.add('zero-value');
-  var text = parsed % 1 === 0 ? String(parsed) : parsed.toFixed(2);
-  return bold ? '<b>' + text + '</b>' : text;
-}
-
-function formatCostCell_(cell, columnKey) {
-  var row = cell.getRow().getData();
-  var el = cell.getElement();
-  el.classList.remove('num-cell', 'zero-value', 'col-total', 'diff-pos', 'diff-neg', 'diff-zero');
-
-  if (columnKey === 'type') {
-    return '<span class="badge ' + getTypeBadgeClass(row.type) + '">' + esc(row.type || '') + '</span>';
-  }
-
-  if (columnKey === 'name' || columnKey === 'flakonName' || columnKey === 'category') {
-    return esc(String(row[columnKey] || ''));
-  }
-
-  el.classList.add('num-cell');
-  if (columnKey === 'total') el.classList.add('col-total');
-  if (columnKey === 'diff' || columnKey === 'diffPct') {
-    if (row.diff > 0) el.classList.add('diff-pos');
-    else if (row.diff < 0) el.classList.add('diff-neg');
-    else el.classList.add('diff-zero');
-  }
-  var rawValue = getCostRawValue(row, columnKey);
-  if (rawValue !== null && parseNumberV2(rawValue) === 0) el.classList.add('zero-value');
-  return esc(getCostDisplayValue(row, columnKey));
-}
-
-function exportFieldName_(sourceCol) {
-  return 'c_' + sourceCol;
-}
-
-function buildExportGridRows_(data) {
-  var rows = data && data.rows ? data.rows : [];
-  var order = getExportDisplayOrderV3(data);
-  var out = [];
-
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i];
-    var item = {
-      _rowIndex: i,
-      _search: getExportSearchHaystackV3(row)
-    };
-    for (var j = 0; j < order.length; j++) {
-      var sourceCol = order[j];
-      item[exportFieldName_(sourceCol)] = row[sourceCol];
-    }
-    out.push(item);
-  }
-  return out;
-}
-
-function buildExportGridColumns_(data) {
-  var headers = getVisibleExportHeadersV3(data);
-  var order = getExportDisplayOrderV3(data);
-  var columns = [];
-
-  for (var i = 0; i < headers.length; i++) {
-    (function(visibleIndex, sourceCol, title) {
-      var isEditable = sourceCol === EXPORT_PRICE_COL || sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL;
-      var isNumeric = !!EXPORT_NUMERIC_COLS[sourceCol] || sourceCol === EXPORT_PRICE_COL || sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL;
-      var fieldName = exportFieldName_(sourceCol);
-
-      columns.push({
-        title: String(title || ''),
-        field: fieldName,
-        headerTooltip: String(title || ''),
-        frozen: visibleIndex < EXPORT_STICKY_COLS,
-        sorter: isNumeric ? 'number' : 'string',
-        hozAlign: isNumeric ? 'right' : 'left',
-        minWidth: visibleIndex < 3 ? 160 : 120,
-        editor: isEditable ? numberEditorFactory_(sourceCol === EXPORT_PRICE_COL ? '0.01' : '0.001', 'rate-input nds-tax-input') : false,
-        formatter: function(cell) {
-          var el = cell.getElement();
-          el.classList.remove('num-cell', 'zero-value');
-          if (isNumeric) return formatNumberCell_(cell, false);
-          return esc(normalizeExportValueV3(cell.getValue()));
-        },
-        cellEdited: isEditable ? function(cell) {
-          var rowIndex = cell.getRow().getData()._rowIndex;
-          var value = cell.getValue();
-          if (STATE.exportData && STATE.exportData.rows && STATE.exportData.rows[rowIndex]) {
-            STATE.exportData.rows[rowIndex][sourceCol] = value;
-          }
-          if (sourceCol === EXPORT_PRICE_COL) onNdsTaxChange(rowIndex, 'supplierPrice', value);
-          if (sourceCol === EXPORT_NDS_COL) onNdsTaxChange(rowIndex, 'nds', value);
-          if (sourceCol === EXPORT_TAX_COL) onNdsTaxChange(rowIndex, 'tax', value);
-        } : null
-      });
-    })(i, order[i], headers[i]);
-  }
-
-  return columns;
-}
-
-function applyExportFiltersTabulator_() {
-  if (!STATE.tables.export || !STATE.exportData) return;
-
-  var query = getExportSearchQueryV3();
-  var order = getExportDisplayOrderV3(STATE.exportData);
-
-  STATE.tables.export.setFilter(function(data) {
-    if (query && String(data._search || '').indexOf(query) < 0) return false;
-
-    for (var filterCol in STATE.exportFilters) {
-      if (!STATE.exportFilters.hasOwnProperty(filterCol)) continue;
-      var value = STATE.exportFilters[filterCol];
-      if (!value) continue;
-      var sourceCol = order[parseInt(filterCol, 10)];
-      var fieldName = exportFieldName_(sourceCol);
-      if (normalizeExportValueV3(data[fieldName]) !== value) return false;
-    }
-    return true;
-  });
-}
-
-function renderExportSlicersV3(data) {
-  var host = document.getElementById('export-slicers');
-  if (!host) return;
-  host.innerHTML = '';
-
-  if (!data || !data.rows || !data.rows.length) return;
-
-  sanitizeExportFiltersV3(data);
-  var defs = buildExportSlicerDefsV3(data);
-  for (var i = 0; i < defs.length; i++) {
-    var def = defs[i];
-    var wrap = document.createElement('div');
-    wrap.className = 'export-slicer';
-
-    var label = document.createElement('label');
-    label.textContent = def.label;
-    wrap.appendChild(label);
-
-    var select = document.createElement('select');
-    select.setAttribute('data-col', def.index);
-
-    var allOpt = document.createElement('option');
-    allOpt.value = '';
-    allOpt.textContent = 'Все значения';
-    select.appendChild(allOpt);
-
-    for (var j = 0; j < def.options.length; j++) {
-      var opt = document.createElement('option');
-      opt.value = def.options[j];
-      opt.textContent = def.options[j];
-      if (STATE.exportFilters[String(def.index)] === def.options[j]) opt.selected = true;
-      select.appendChild(opt);
-    }
-
-    select.addEventListener('change', function() {
-      var colIndex = String(this.getAttribute('data-col'));
-      if (this.value) STATE.exportFilters[colIndex] = this.value;
-      else delete STATE.exportFilters[colIndex];
-      applyExportFiltersTabulator_();
-    });
-
-    wrap.appendChild(select);
-    host.appendChild(wrap);
-  }
-}
-
-function renderExportTable(data) {
-  if (!data || !data.headers) return;
-  if (!hasTabulator_()) {
-    setStatus('export-status', 'Ошибка загрузки Tabulator. Проверьте локальное подключение библиотеки.', 'error');
-    return;
-  }
-
-  STATE.exportData = data;
-  renderExportSlicersV3(data);
-  destroyTable_('export');
-
-  STATE.tables.export = new Tabulator('#export-grid', {
-    data: buildExportGridRows_(data),
-    columns: buildExportGridColumns_(data),
-    layout: 'fitDataStretch',
-    height: '62vh',
-    placeholder: 'Нет данных для отображения',
-    index: '_rowIndex',
-    downloadRowRange: 'all'
-  });
-
-  applyExportFiltersTabulator_();
-  setTimeout(function() { redrawTable_('export'); }, 0);
-}
-
-function renderExportRows() {
-  if (!STATE.exportData || !STATE.tables.export) return;
-  STATE.tables.export.setData(buildExportGridRows_(STATE.exportData));
-  applyExportFiltersTabulator_();
-}
-
-function filterExportTable() {
-  applyExportFiltersTabulator_();
-}
-
-function buildFlakonGridColumns_() {
-  return [
-    {
-      title: 'Флакон',
-      field: 'name',
-      frozen: true,
-      minWidth: 220,
-      formatter: function(cell) { return esc(String(cell.getValue() || '')); }
-    },
-    {
-      title: 'Объём',
-      field: 'volume',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 110,
-      editor: numberEditorFactory_('1', 'rate-input'),
-      formatter: function(cell) { return formatNumberCell_(cell, false); }
-    },
-    {
-      title: 'Вес',
-      field: 'weight',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 110,
-      editor: numberEditorFactory_('0.001', 'rate-input'),
-      formatter: function(cell) { return formatNumberCell_(cell, false); }
-    },
-    {
-      title: 'Цена поставщика',
-      field: 'supplierPrice',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 140,
-      editor: numberEditorFactory_('0.01', 'rate-input'),
-      formatter: function(cell) { return formatNumberCell_(cell, false); }
-    },
-    {
-      title: 'НДС',
-      field: 'nds',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 100,
-      editor: numberEditorFactory_('0.001', 'rate-input'),
-      formatter: function(cell) { return formatNumberCell_(cell, false); }
-    },
-    {
-      title: 'Пошлина',
-      field: 'tax',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 110,
-      editor: numberEditorFactory_('0.001', 'rate-input'),
-      formatter: function(cell) { return formatNumberCell_(cell, false); }
-    },
-    {
-      title: 'Этикетка',
-      field: 'label',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 110,
-      editor: numberEditorFactory_('0.01', 'rate-input'),
-      formatter: function(cell) { return formatNumberCell_(cell, false); }
-    },
-    {
-      title: 'Цена флакона в руб.',
-      field: 'rawFl',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 150,
-      formatter: function(cell) {
-        cell.getElement().classList.add('calc-col-cell');
-        return formatNumberCell_(cell, false);
-      }
-    },
-    {
-      title: 'Доставка в руб.',
-      field: 'deliveryFl',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 145,
-      formatter: function(cell) {
-        cell.getElement().classList.add('calc-col-cell');
-        return formatNumberCell_(cell, false);
-      }
-    },
-    {
-      title: 'НДС+пошлина',
-      field: 'taxDutyFl',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 145,
-      formatter: function(cell) {
-        cell.getElement().classList.add('calc-col-cell');
-        return formatNumberCell_(cell, false);
-      }
-    },
-    {
-      title: 'Себестоимость флакона',
-      field: 'totalFl',
-      hozAlign: 'right',
-      sorter: 'number',
-      minWidth: 170,
-      formatter: function(cell) {
-        cell.getElement().classList.add('calc-col-cell');
-        return formatNumberCell_(cell, true);
-      }
-    }
-  ];
-}
-
-function renderFlakonsTable(flakons) {
-  if (!hasTabulator_()) {
-    setStatus('flakons-status', 'Ошибка загрузки Tabulator. Проверьте локальное подключение библиотеки.', 'error');
-    return;
-  }
-
-  STATE.flakons = flakons || [];
-  destroyTable_('flakons');
-
-  var gridData = [];
-  for (var i = 0; i < STATE.flakons.length; i++) {
-    var item = {};
-    for (var key in STATE.flakons[i]) {
-      if (STATE.flakons[i].hasOwnProperty(key)) item[key] = STATE.flakons[i][key];
-    }
-    item._rowIndex = i;
-    gridData.push(item);
-  }
-
-  STATE.tables.flakons = new Tabulator('#flakons-grid', {
-    data: gridData,
-    columns: buildFlakonGridColumns_(),
-    layout: 'fitDataStretch',
-    height: '62vh',
-    placeholder: 'Нет данных для отображения'
-  });
-
-  setTimeout(function() { redrawTable_('flakons'); }, 0);
-}
-
-function collectFlakonData() {
-  var rows = STATE.tables.flakons ? STATE.tables.flakons.getData() : (STATE.flakons || []);
-  rows = rows.slice().sort(function(a, b) {
-    return (a._rowIndex || 0) - (b._rowIndex || 0);
-  });
-  var out = [];
-  for (var i = 0; i < rows.length; i++) {
-    out.push({
-      name: rows[i].name,
-      volume: parseFloat(rows[i].volume) || 0,
-      weight: parseFloat(rows[i].weight) || 0,
-      supplierPrice: parseFloat(rows[i].supplierPrice) || 0,
-      nds: parseFloat(rows[i].nds) || 0,
-      tax: parseFloat(rows[i].tax) || 0,
-      label: parseFloat(rows[i].label) || 0
-    });
-  }
-  return out;
-}
-
-function buildCostGridColumns_() {
-  var columns = [];
-
-  for (var i = 0; i < COST_COLUMNS.length; i++) {
-    (function(index, col) {
-      columns.push({
-        title: col.label,
-        field: col.key,
-        frozen: index < 4,
-        headerSort: true,
-        sorter: col.numeric ? 'number' : 'string',
-        hozAlign: col.numeric ? 'right' : 'left',
-        minWidth: col.key === 'name' ? 220 : (col.key === 'type' ? 120 : 110),
-        formatter: function(cell) {
-          return formatCostCell_(cell, col.key);
-        }
-      });
-    })(i, COST_COLUMNS[i]);
-  }
-
-  return columns;
-}
-
-function applyCostFiltersTabulator_() {
-  if (!STATE.tables.cost) return;
-
-  var query = getCostSearchQuery();
-  var typeEl = document.getElementById('cost-type-filter');
-  var typeFilter = typeEl ? typeEl.value : '';
-
-  STATE.tables.cost.setFilter(function(data) {
-    if (query && getCostSearchHaystack(data).indexOf(query) < 0) return false;
-    if (typeFilter && data.type !== typeFilter) return false;
-
-    for (var key in STATE.costFilters) {
-      if (!STATE.costFilters.hasOwnProperty(key)) continue;
-      if (getCostFilterValue(data, key) !== STATE.costFilters[key]) return false;
-    }
-    return true;
-  });
-}
-
-function renderCostSlicers() {
-  var host = document.getElementById('cost-slicers');
-  if (!host) return;
-  host.innerHTML = '';
-
-  if (!STATE.calcResults || !STATE.calcResults.length) return;
-
-  sanitizeCostFilters();
-  var defs = buildCostSlicerDefs();
-  for (var i = 0; i < defs.length; i++) {
-    var def = defs[i];
-    var wrap = document.createElement('div');
-    wrap.className = 'export-slicer';
-
-    var label = document.createElement('label');
-    label.textContent = def.label;
-    wrap.appendChild(label);
-
-    var select = document.createElement('select');
-    select.setAttribute('data-key', def.key);
-
-    var allOpt = document.createElement('option');
-    allOpt.value = '';
-    allOpt.textContent = 'Все значения';
-    select.appendChild(allOpt);
-
-    for (var j = 0; j < def.options.length; j++) {
-      var opt = document.createElement('option');
-      opt.value = def.options[j];
-      opt.textContent = def.options[j];
-      if (STATE.costFilters[def.key] === def.options[j]) opt.selected = true;
-      select.appendChild(opt);
-    }
-
-    select.addEventListener('change', function() {
-      var key = this.getAttribute('data-key');
-      if (this.value) STATE.costFilters[key] = this.value;
-      else delete STATE.costFilters[key];
-      applyCostFiltersTabulator_();
-    });
-
-    wrap.appendChild(select);
-    host.appendChild(wrap);
-  }
-}
-
-function renderCostTable(results) {
-  if (!hasTabulator_()) {
-    setStatus('cost-status', 'Ошибка загрузки Tabulator. Проверьте локальное подключение библиотеки.', 'error');
-    return;
-  }
-
-  if (results) STATE.calcResults = results;
-  renderCostSlicers();
-  destroyTable_('cost');
-
-  STATE.tables.cost = new Tabulator('#cost-grid', {
-    data: STATE.calcResults || [],
-    columns: buildCostGridColumns_(),
-    layout: 'fitDataStretch',
-    height: '62vh',
-    placeholder: 'Нет данных для отображения',
-    downloadRowRange: 'all'
-  });
-
-  applyCostFiltersTabulator_();
-  setTimeout(function() { redrawTable_('cost'); }, 0);
-}
-
-function filterCostTable() {
-  applyCostFiltersTabulator_();
-}
-
-function exportCostExcel() {
-  if (!STATE.calcResults || !STATE.calcResults.length) {
-    setStatus('cost-status', 'Сначала выполните расчёт', 'error');
-    return;
-  }
-
-  if (STATE.tables.cost && typeof STATE.tables.cost.download === 'function') {
-    STATE.tables.cost.download('xlsx', 'cost_results.xlsx', { sheetName: 'Себестоимость' });
-    return;
-  }
-
-  loadXLSX(function() {
-    var rows = [];
-    var headers = [];
-
-    for (var i = 0; i < COST_COLUMNS.length; i++) headers.push(COST_COLUMNS[i].label);
-    rows.push(headers);
-
-    for (var j = 0; j < STATE.calcResults.length; j++) {
-      var r = STATE.calcResults[j];
-      var row = [];
-      for (var k = 0; k < COST_COLUMNS.length; k++) {
-        var key = COST_COLUMNS[k].key;
-        if (key === 'diffPct') row.push(r.cost1C > 0 ? r.diffPct : '');
-        else row.push(getCostRawValue(r, key));
-      }
-      rows.push(row);
-    }
-
-    var wb = XLSX.utils.book_new();
-    var ws = XLSX.utils.aoa_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Себестоимость');
-    XLSX.writeFile(wb, 'cost_results.xlsx');
-  });
-}
-
 window.addEventListener('resize', function() {
-  redrawTable_('export');
-  redrawTable_('flakons');
-  redrawTable_('cost');
+  applyExportStickyColumnsV3();
 });
 </script>
