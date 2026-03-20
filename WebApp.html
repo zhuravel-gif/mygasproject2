@@ -178,6 +178,14 @@
           <label>Комиссия (множитель)</label>
           <input id="p-com" type="number" step="0.01" value="1.05">
         </div>
+        <div class="param-group">
+          <label>Логистика * для флаконов</label>
+          <input id="p-log-fl" type="number" step="0.1" value="4.5">
+        </div>
+        <div class="param-group">
+          <label>Комиссия * для флаконов</label>
+          <input id="p-com-fl" type="number" step="0.01" value="1.05">
+        </div>
       </div>
 
       <div class="actions">
@@ -190,8 +198,21 @@
 
   <div id="tab-flakons" class="tab-content">
     <div class="card">
-      <h2>Себестоимость флаконов и этикетки</h2>
-      <p class="hint">Заполните цены флаконов, НДС, доставку и этикетку. Эти данные участвуют в расчёте для сырья.</p>
+      <div class="section-head">
+        <h2>Себестоимость флаконов и этикетки</h2>
+        <button class="btn btn-secondary btn-sm" onclick="toggleFlakonGuide()">Инструкция</button>
+      </div>
+      <p class="hint">Заполните ручные поля и используйте обновление для пересчёта вычисляемых колонок по данным импорта и параметрам *_fl.</p>
+
+      <div id="flakon-guide" class="guide-card hidden">
+        <ol class="guide-list">
+          <li>Загрузите номенклатуру, себестоимость и цену поставщика на вкладке Импорт данных.</li>
+          <li>Откройте вкладку Флаконы и нажмите Обновить, чтобы собрать уникальные флаконы из 1cData и пересчитать формулы.</li>
+          <li>Проверьте и при необходимости скорректируйте объём, вес, НДС, пошлину и стоимость этикетки.</li>
+          <li>Цена поставщика подставляется из 1cData, а цветные колонки считаются автоматически по параметрам log_fl и com_fl.</li>
+          <li>Нажмите Сохранить, чтобы записать ручные поля и текущие вычисленные значения на лист Флаконы.</li>
+        </ol>
+      </div>
 
       <div class="actions">
         <button class="btn btn-primary" onclick="saveFlakonDataUI()">Сохранить</button>
@@ -207,10 +228,15 @@
             <tr>
               <th>Флакон</th>
               <th>Объём</th>
-              <th>Цена</th>
+              <th>Вес</th>
+              <th>Цена поставщика</th>
               <th>НДС</th>
-              <th>Доставка</th>
+              <th>Пошлина</th>
+              <th class="calc-col-head">Цена флакона в руб.</th>
+              <th class="calc-col-head">Доставка в руб.</th>
+              <th class="calc-col-head">НДС+пошлина</th>
               <th>Этикетка</th>
+              <th class="calc-col-head">Себестоимость флакона</th>
             </tr>
           </thead>
           <tbody id="flakons-tbody"></tbody>
@@ -250,10 +276,11 @@
               <th>Сырьё</th>
               <th>Нал+Пош</th>
               <th>Доставка</th>
-              <th>Флакон</th>
-              <th>Нал.Фл</th>
-              <th>Дост.Фл</th>
+              <th>Цена фл.</th>
+              <th>Дост. фл.</th>
+              <th>НДС+пошл. фл.</th>
               <th>Этикетка</th>
+              <th>Себес. фл.</th>
               <th class="col-total">ИТОГО</th>
               <th>Себес 1С</th>
               <th>Разница</th>

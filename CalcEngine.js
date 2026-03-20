@@ -32,15 +32,54 @@ function determineType(row) {
   return 'Сырьё';
 }
 
+function calculateFlakonMetrics_(item, params) {
+  var supplierPrice = toNumber_(item && item.supplierPrice, 0);
+  var weight = toNumber_(item && item.weight, 0);
+  var ndsRate = toNumber_(item && item.nds, 0.22);
+  var taxRate = toNumber_(item && item.tax, 0.065);
+  var label = toNumber_(item && item.label, 0);
+  var usd = toNumber_(params && params.usd, 92);
+  var rmb = toNumber_(params && params.rmb, 12.8);
+  var logFl = toNumber_(params && params.logFl, 4.5);
+  var comFl = toNumber_(params && params.comFl, 1.05);
+
+  var rawFl = supplierPrice * rmb * comFl;
+  var deliveryFl = logFl * weight * 1.15 * usd * comFl;
+  var taxDutyFl = (rawFl + deliveryFl + rawFl * taxRate) * ndsRate + rawFl * taxRate;
+  var totalFl = rawFl + deliveryFl + taxDutyFl + label;
+
+  return {
+    supplierPrice: supplierPrice,
+    weight: weight,
+    nds: ndsRate,
+    tax: taxRate,
+    label: round2_(label),
+    rawFl: round2_(rawFl),
+    deliveryFl: round2_(deliveryFl),
+    taxDutyFl: round2_(taxDutyFl),
+    totalFl: round2_(totalFl)
+  };
+}
+
 function buildFlakonMap(flakons) {
   var map = {};
   for (var i = 0; i < flakons.length; i++) {
-    var item = flakons[i];
-    map[item.name] = {
-      price: toNumber_(item.price, 0),
-      nds: toNumber_(item.nds, 0),
-      delivery: toNumber_(item.delivery, 0),
-      label: toNumber_(item.label, 0)
+    var item = flakons[i] || {};
+    var name = String(item.name || '').trim();
+    if (!name) continue;
+    var metrics = calculateFlakonMetrics_(item, {});
+    map[name] = {
+      name: name,
+      volume: toNumber_(item.volume, 0),
+      supplierPrice: toNumber_(item.supplierPrice, metrics.supplierPrice),
+      weight: toNumber_(item.weight, metrics.weight),
+      nds: toNumber_(item.nds, metrics.nds),
+      tax: toNumber_(item.tax, metrics.tax),
+      label: toNumber_(item.label, metrics.label),
+      rawFl: toNumber_(item.rawFl, metrics.rawFl),
+      deliveryFl: toNumber_(item.deliveryFl, metrics.deliveryFl),
+      taxDutyFl: toNumber_(item.taxDutyFl, metrics.taxDutyFl),
+      totalFl: toNumber_(item.totalFl, metrics.totalFl)
     };
   }
   return map;
@@ -64,10 +103,11 @@ function calculateOne(row, params, flakonMap) {
     raw: 0,
     taxDuty: 0,
     delivery: 0,
-    flakon: 0,
-    flakonTax: 0,
-    flakonDelivery: 0,
+    rawFl: 0,
+    deliveryFl: 0,
+    taxDutyFl: 0,
     label: 0,
+    totalFl: 0,
     total: 0,
     cost1C: cost1C,
     diff: 0,
@@ -80,9 +120,9 @@ function calculateOne(row, params, flakonMap) {
   }
 
   if (type === 'Готовый товар') {
-    var weight = toNumber_(row[COL.WEIGHT], 0);
+    var finishedWeight = toNumber_(row[COL.WEIGHT], 0);
     result.raw = priceVal * rmb * com;
-    result.delivery = log * weight * 1.15 * usd * com;
+    result.delivery = log * finishedWeight * 1.15 * usd * com;
     result.taxDuty = (result.raw + result.delivery + result.raw * taxRate) * ndsRate + result.raw * taxRate;
   } else {
     var volume = toNumber_(row[COL.VOL], 0);
@@ -91,29 +131,34 @@ function calculateOne(row, params, flakonMap) {
     result.taxDuty = (result.raw + result.delivery + result.raw * taxRate) * ndsRate + result.raw * taxRate;
 
     var flakonName = String(row[COL.FLAKON] || '').trim();
-    var flakon = flakonMap[flakonName] || { price: 0, nds: 0, delivery: 0, label: 0 };
-    result.flakon = toNumber_(flakon.price, 0);
-    result.flakonTax = toNumber_(flakon.nds, 0);
-    result.flakonDelivery = toNumber_(flakon.delivery, 0);
+    var flakon = flakonMap[flakonName] || {
+      rawFl: 0,
+      deliveryFl: 0,
+      taxDutyFl: 0,
+      label: 0,
+      totalFl: 0
+    };
+    result.rawFl = toNumber_(flakon.rawFl, 0);
+    result.deliveryFl = toNumber_(flakon.deliveryFl, 0);
+    result.taxDutyFl = toNumber_(flakon.taxDutyFl, 0);
     result.label = toNumber_(flakon.label, 0);
+    result.totalFl = toNumber_(flakon.totalFl, 0);
   }
 
   result.raw = round2_(result.raw);
   result.taxDuty = round2_(result.taxDuty);
   result.delivery = round2_(result.delivery);
-  result.flakon = round2_(result.flakon);
-  result.flakonTax = round2_(result.flakonTax);
-  result.flakonDelivery = round2_(result.flakonDelivery);
+  result.rawFl = round2_(result.rawFl);
+  result.deliveryFl = round2_(result.deliveryFl);
+  result.taxDutyFl = round2_(result.taxDutyFl);
   result.label = round2_(result.label);
+  result.totalFl = round2_(result.totalFl);
 
   result.total = round2_(
     result.raw +
     result.taxDuty +
     result.delivery +
-    result.flakon +
-    result.flakonTax +
-    result.flakonDelivery +
-    result.label
+    result.totalFl
   );
 
   result.diff = cost1C > 0 ? round2_(result.total - cost1C) : 0;
@@ -192,10 +237,22 @@ function getVerification(index, params) {
   var rmb = toNumber_(params.rmb, 12.8);
   var log = toNumber_(params.log, 4.5);
   var com = toNumber_(params.com, 1.05);
+  var logFl = toNumber_(params.logFl, 4.5);
+  var comFl = toNumber_(params.comFl, 1.05);
   var volume = toNumber_(row[COL.VOL], 0);
   var weight = toNumber_(row[COL.WEIGHT], 0);
   var flakonName = String(row[COL.FLAKON] || '').trim();
-  var flakon = flakonMap[flakonName] || { price: 0, nds: 0, delivery: 0, label: 0 };
+  var flakon = flakonMap[flakonName] || {
+    supplierPrice: 0,
+    weight: 0,
+    nds: 0.22,
+    tax: 0.065,
+    label: 0,
+    rawFl: 0,
+    deliveryFl: 0,
+    taxDutyFl: 0,
+    totalFl: 0
+  };
   var cost1C = toNumber_(row[COL.COST_1C], 0);
   var steps = [];
 
@@ -230,12 +287,12 @@ function getVerification(index, params) {
   } else {
     steps.push({
       title: 'Сырьё',
-      formula: '(Цена × RMB × Ком / 1000) × Объем = (' + priceVal + ' × ' + rmb + ' × ' + com + ' / 1000) × ' + volume,
+      formula: '(Цена × RMB × Ком / 1000) × Объём = (' + priceVal + ' × ' + rmb + ' × ' + com + ' / 1000) × ' + volume,
       result: result.raw.toFixed(2)
     });
     steps.push({
       title: 'Доставка',
-      formula: 'Лог × Объем/1000 × 1.15 × USD × Ком = ' + log + ' × ' + (volume / 1000).toFixed(4) + ' × 1.15 × ' + usd + ' × ' + com,
+      formula: 'Лог × Объём/1000 × 1.15 × USD × Ком = ' + log + ' × ' + (volume / 1000).toFixed(4) + ' × 1.15 × ' + usd + ' × ' + com,
       result: result.delivery.toFixed(2)
     });
     steps.push({
@@ -244,24 +301,29 @@ function getVerification(index, params) {
       result: result.taxDuty.toFixed(2)
     });
     steps.push({
-      title: 'Флакон',
-      formula: 'Флакон "' + flakonName + '": цена = ' + toNumber_(flakon.price, 0),
-      result: result.flakon.toFixed(2)
+      title: 'Цена флакона в руб.',
+      formula: 'Цена поставщика × RMB × Ком_fl = ' + toNumber_(flakon.supplierPrice, 0) + ' × ' + rmb + ' × ' + comFl,
+      result: result.rawFl.toFixed(2)
     });
     steps.push({
-      title: 'НДС флакона',
-      formula: 'Из таблицы флаконов',
-      result: result.flakonTax.toFixed(2)
+      title: 'Доставка флакона в руб.',
+      formula: 'Лог_fl × Вес × 1.15 × USD × Ком_fl = ' + logFl + ' × ' + toNumber_(flakon.weight, 0) + ' × 1.15 × ' + usd + ' × ' + comFl,
+      result: result.deliveryFl.toFixed(2)
     });
     steps.push({
-      title: 'Доставка флакона',
-      formula: 'Из таблицы флаконов',
-      result: result.flakonDelivery.toFixed(2)
+      title: 'НДС+пошлина флакона',
+      formula: '(Цена флакона + Доставка флакона + Цена флакона×Пошлина_fl) × НДС_fl + Цена флакона×Пошлина_fl',
+      result: result.taxDutyFl.toFixed(2)
     });
     steps.push({
       title: 'Этикетка',
       formula: 'Из таблицы флаконов',
       result: result.label.toFixed(2)
+    });
+    steps.push({
+      title: 'Себестоимость флакона',
+      formula: 'Цена флакона + Доставка флакона + НДС+пошлина + Этикетка',
+      result: result.totalFl.toFixed(2)
     });
   }
 
@@ -290,6 +352,8 @@ function getVerification(index, params) {
       rmb: rmb,
       log: log,
       com: com,
+      logFl: logFl,
+      comFl: comFl,
       ndsRate: ndsRate,
       taxRate: taxRate
     }

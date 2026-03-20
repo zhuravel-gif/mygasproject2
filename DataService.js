@@ -200,15 +200,17 @@ function getParams() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.BASIS);
   if (!sheet || sheet.getLastRow() < 2) {
-    return { usd: 92, rmb: 12.8, log: 4.5, com: 1.05 };
+    return { usd: 92, rmb: 12.8, log: 4.5, com: 1.05, logFl: 4.5, comFl: 1.05 };
   }
 
-  var data = sheet.getRange(2, 1, 1, 4).getValues()[0];
+  var data = sheet.getRange(2, 1, 1, 6).getValues()[0];
   return {
-    usd: data[0] || 92,
-    rmb: data[1] || 12.8,
-    log: data[2] || 4.5,
-    com: data[3] || 1.05
+    usd: hasValue_(data[0]) ? data[0] : 92,
+    rmb: hasValue_(data[1]) ? data[1] : 12.8,
+    log: hasValue_(data[2]) ? data[2] : 4.5,
+    com: hasValue_(data[3]) ? data[3] : 1.05,
+    logFl: hasValue_(data[4]) ? data[4] : (hasValue_(data[2]) ? data[2] : 4.5),
+    comFl: hasValue_(data[5]) ? data[5] : (hasValue_(data[3]) ? data[3] : 1.05)
   };
 }
 
@@ -216,15 +218,17 @@ function saveParams(p) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.BASIS) || ss.insertSheet(CFG.BASIS);
   sheet.clear();
-  sheet.getRange(1, 1, 1, 4)
-    .setValues([['USD', 'RMB', 'Логистика', 'Комиссия']])
+  sheet.getRange(1, 1, 1, 6)
+    .setValues([['USD', 'RMB', 'Логистика', 'Комиссия', 'Логистика_fl', 'Комиссия_fl']])
     .setFontWeight('bold');
-  sheet.getRange(2, 1, 1, 4)
+  sheet.getRange(2, 1, 1, 6)
     .setValues([[
-      coerceNumber_(p.usd) || 92,
-      coerceNumber_(p.rmb) || 12.8,
-      coerceNumber_(p.log) || 4.5,
-      coerceNumber_(p.com) || 1.05
+      hasValue_(coerceNumber_(p.usd)) ? coerceNumber_(p.usd) : 92,
+      hasValue_(coerceNumber_(p.rmb)) ? coerceNumber_(p.rmb) : 12.8,
+      hasValue_(coerceNumber_(p.log)) ? coerceNumber_(p.log) : 4.5,
+      hasValue_(coerceNumber_(p.com)) ? coerceNumber_(p.com) : 1.05,
+      hasValue_(coerceNumber_(p.logFl)) ? coerceNumber_(p.logFl) : (hasValue_(coerceNumber_(p.log)) ? coerceNumber_(p.log) : 4.5),
+      hasValue_(coerceNumber_(p.comFl)) ? coerceNumber_(p.comFl) : (hasValue_(coerceNumber_(p.com)) ? coerceNumber_(p.com) : 1.05)
     ]]);
   return { success: true };
 }
@@ -233,88 +237,82 @@ function getFlakonList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var flSheet = ss.getSheetByName(CFG.FLAKONS);
   var savedMap = {};
-  var savedList = [];
+  var params = getParams();
 
   if (flSheet && flSheet.getLastRow() > 1) {
     var flData = flSheet.getDataRange().getValues();
     for (var i = 1; i < flData.length; i++) {
-      var savedItem = {
-        name: String(flData[i][0] || '').trim(),
-        volume: flData[i][1] || 0,
-        price: flData[i][2] || 0,
-        nds: flData[i][3] || 0,
-        delivery: flData[i][4] || 0,
-        label: flData[i][5] || 0
-      };
-      if (!savedItem.name) continue;
-      savedMap[savedItem.name] = savedItem;
-      savedList.push(savedItem);
+      var savedName = String(flData[i][0] || '').trim();
+      if (!savedName) continue;
+      savedMap[savedName] = normalizeStoredFlakonRow_(flData[i]);
     }
   }
 
   var dataSheet = ss.getSheetByName(CFG.DATA);
-  if (!dataSheet || dataSheet.getLastRow() < 2) return savedList;
+  if (!dataSheet || dataSheet.getLastRow() < 2) {
+    return recalculateFlakonList_(mapValues_(savedMap), params);
+  }
 
   var data = dataSheet.getDataRange().getValues();
-  var result = [];
-  var seen = {};
+  var flakonMap = {};
 
   for (var j = 1; j < data.length; j++) {
     var flakonName = String(data[j][8] || '').trim();
-    if (flakonName && !seen[flakonName]) {
-      seen[flakonName] = true;
-      if (savedMap[flakonName]) {
-        result.push({
-          name: flakonName,
-          volume: savedMap[flakonName].volume || 0,
-          price: savedMap[flakonName].price || 0,
-          nds: savedMap[flakonName].nds || 0,
-          delivery: savedMap[flakonName].delivery || 0,
-          label: savedMap[flakonName].label || 0
-        });
-      } else {
-        result.push({
-          name: flakonName,
-          volume: data[j][4] || 0,
-          price: 0,
-          nds: 0,
-          delivery: 0,
-          label: 0
-        });
-      }
-    }
+    if (!flakonName || flakonMap[flakonName]) continue;
+
+    var imported = {
+      name: flakonName,
+      volume: data[j][4] || 0,
+      weight: data[j][12] || 0,
+      supplierPrice: data[j][15] || 0,
+      nds: 0.22,
+      tax: 0.065,
+      label: 0
+    };
+    flakonMap[flakonName] = mergeFlakonRows_(imported, savedMap[flakonName]);
   }
 
-  return result;
+  return recalculateFlakonList_(mapValues_(flakonMap), params);
 }
 
 function saveFlakonData(flakons) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.FLAKONS) || ss.insertSheet(CFG.FLAKONS);
-  sheet.clear();
-
-  var headers = ['Флакон', 'Объем', 'Цена', 'НДС', 'Доставка', 'Этикетка'];
+  var normalized = recalculateFlakonList_(flakons || [], getParams());
+  var headers = ['Флакон', 'Объём', 'Вес', 'Цена поставщика', 'НДС', 'Пошлина', 'Цена флакона в руб.', 'Доставка в руб.', 'НДС+пошлина', 'Этикетка', 'Себестоимость флакона'];
   var rows = [headers];
 
-  for (var i = 0; i < flakons.length; i++) {
-    var item = flakons[i];
+  for (var i = 0; i < normalized.length; i++) {
+    var item = normalized[i];
     rows.push([
       item.name || '',
       coerceNumber_(item.volume) || 0,
-      coerceNumber_(item.price) || 0,
-      coerceNumber_(item.nds) || 0,
-      coerceNumber_(item.delivery) || 0,
-      coerceNumber_(item.label) || 0
+      coerceNumber_(item.weight) || 0,
+      coerceNumber_(item.supplierPrice) || 0,
+      hasValue_(coerceNumber_(item.nds)) ? coerceNumber_(item.nds) : 0.22,
+      hasValue_(coerceNumber_(item.tax)) ? coerceNumber_(item.tax) : 0.065,
+      coerceNumber_(item.rawFl) || 0,
+      coerceNumber_(item.deliveryFl) || 0,
+      coerceNumber_(item.taxDutyFl) || 0,
+      coerceNumber_(item.label) || 0,
+      coerceNumber_(item.totalFl) || 0
     ]);
   }
 
+  sheet.clear();
   sheet.getRange(1, 1, rows.length, headers.length).setValues(rows);
   sheet.getRange(1, 1, 1, headers.length)
     .setFontWeight('bold')
     .setBackground('#4a86c8')
     .setFontColor('#ffffff');
   sheet.setFrozenRows(1);
-  return { success: true, count: flakons.length };
+
+  if (rows.length > 1) {
+    sheet.getRange(2, 2, rows.length - 1, 10).setNumberFormat('#,##0.00');
+    sheet.getRange(2, 5, rows.length - 1, 2).setNumberFormat('0.0%');
+  }
+
+  return { success: true, count: normalized.length, flakons: normalized };
 }
 
 function saveResults(results) {
@@ -329,10 +327,11 @@ function saveResults(results) {
     'Сырьё',
     'Нал+Пош',
     'Доставка',
-    'Флакон',
-    'Нал.Фл',
-    'Дост.Фл',
+    'Цена флакона в руб.',
+    'Доставка флакона в руб.',
+    'НДС+пошлина флакона',
     'Этикетка',
+    'Себестоимость флакона',
     'ИТОГО',
     'Себес 1С',
     'Разница',
@@ -348,10 +347,11 @@ function saveResults(results) {
       resultItem.raw,
       resultItem.taxDuty,
       resultItem.delivery,
-      resultItem.flakon,
-      resultItem.flakonTax,
-      resultItem.flakonDelivery,
+      resultItem.rawFl,
+      resultItem.deliveryFl,
+      resultItem.taxDutyFl,
       resultItem.label,
+      resultItem.totalFl,
       resultItem.total,
       resultItem.cost1C,
       resultItem.diff,
@@ -367,8 +367,8 @@ function saveResults(results) {
   sheet.setFrozenRows(1);
 
   if (rows.length > 1) {
-    sheet.getRange(2, 3, rows.length - 1, 9).setNumberFormat('#,##0.00');
-    sheet.getRange(2, 13, rows.length - 1, 1).setNumberFormat('0.0%');
+    sheet.getRange(2, 3, rows.length - 1, 10).setNumberFormat('#,##0.00');
+    sheet.getRange(2, 14, rows.length - 1, 1).setNumberFormat('0.0%');
   }
 
   return { success: true, sheetName: sheetName, count: results.length };
@@ -644,5 +644,71 @@ function arrayToNamedRow_(row) {
   }
   if (row.length > CFG.BASE_COLS + 2) result.nds = row[CFG.NDS_COL];
   if (row.length > CFG.BASE_COLS + 3) result.tax = row[CFG.TAX_COL];
+  return result;
+}
+
+function normalizeStoredFlakonRow_(row) {
+  var hasNewSchema = row.length >= 11;
+  return {
+    name: row[0] || '',
+    volume: row[1] || 0,
+    weight: hasNewSchema ? row[2] || 0 : 0,
+    supplierPrice: hasNewSchema ? row[3] || 0 : 0,
+    nds: hasNewSchema ? (hasValue_(row[4]) ? row[4] : 0.22) : (hasValue_(row[3]) ? row[3] : 0.22),
+    tax: hasNewSchema ? (hasValue_(row[5]) ? row[5] : 0.065) : 0.065,
+    label: hasNewSchema ? row[9] || 0 : row[5] || 0
+  };
+}
+
+function mergeFlakonRows_(imported, saved) {
+  if (!saved) return imported;
+  return {
+    name: imported.name || saved.name || '',
+    volume: hasValue_(saved.volume) ? saved.volume : imported.volume,
+    weight: hasValue_(saved.weight) ? saved.weight : imported.weight,
+    supplierPrice: hasValue_(imported.supplierPrice) ? imported.supplierPrice : saved.supplierPrice,
+    nds: hasValue_(saved.nds) ? saved.nds : imported.nds,
+    tax: hasValue_(saved.tax) ? saved.tax : imported.tax,
+    label: hasValue_(saved.label) ? saved.label : imported.label
+  };
+}
+
+function recalculateFlakonList_(flakons, params) {
+  var result = [];
+  for (var i = 0; i < flakons.length; i++) {
+    var item = flakons[i] || {};
+    var name = String(item.name || '').trim();
+    if (!name) continue;
+
+    var normalized = {
+      name: name,
+      volume: toNumber_(item.volume, 0),
+      weight: toNumber_(item.weight, 0),
+      supplierPrice: toNumber_(item.supplierPrice, 0),
+      nds: toNumber_(item.nds, 0.22),
+      tax: toNumber_(item.tax, 0.065),
+      label: toNumber_(item.label, 0)
+    };
+    var metrics = calculateFlakonMetrics_(normalized, params || {});
+    normalized.rawFl = metrics.rawFl;
+    normalized.deliveryFl = metrics.deliveryFl;
+    normalized.taxDutyFl = metrics.taxDutyFl;
+    normalized.totalFl = metrics.totalFl;
+    normalized.label = metrics.label;
+    result.push(normalized);
+  }
+  return result;
+}
+
+function hasValue_(value) {
+  return value !== '' && value !== null && value !== undefined;
+}
+
+function mapValues_(obj) {
+  var result = [];
+  var keys = Object.keys(obj || {});
+  for (var i = 0; i < keys.length; i++) {
+    result.push(obj[keys[i]]);
+  }
   return result;
 }
