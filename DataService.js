@@ -46,13 +46,17 @@ var IMPORT_META_KEYS = {
 };
 
 function getImportSettings() {
+  var params = getParams();
   return {
     mappings: {
       nomenclature: getSavedImportMapping_('nomenclature'),
       cost: getSavedImportMapping_('cost'),
       supplier: getSavedImportMapping_('supplier')
     },
-    rateDefaults: getRateDefaults_()
+    rateDefaults: {
+      nds: params.importNds,
+      tax: params.importTax
+    }
   };
 }
 
@@ -62,10 +66,11 @@ function importBaseNomenclature(payload) {
   }
 
   var defaults = payload.defaults || {};
+  var params = getParams();
   var ndsDefault = coerceNumber_(defaults.nds);
   var taxDefault = coerceNumber_(defaults.tax);
-  if (ndsDefault === '') ndsDefault = 0.22;
-  if (taxDefault === '') taxDefault = 0.065;
+  if (ndsDefault === '') ndsDefault = params.importNds;
+  if (taxDefault === '') taxDefault = params.importTax;
 
   var rows = [];
   for (var i = 0; i < payload.rows.length; i++) {
@@ -93,7 +98,6 @@ function importBaseNomenclature(payload) {
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
   saveImportMapping_('nomenclature', payload.mapping || null);
-  setRateDefaults_({ nds: ndsDefault, tax: taxDefault });
 
   return {
     success: true,
@@ -172,8 +176,6 @@ function updateAllNdsTax(nds, tax) {
   formatDataSheet_(sheet, numRows);
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
-  setRateDefaults_({ nds: ndsValue, tax: taxValue });
-
   return { success: true, count: numRows };
 }
 
@@ -200,17 +202,32 @@ function getParams() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.BASIS);
   if (!sheet || sheet.getLastRow() < 2) {
-    return { usd: 92, rmb: 12.8, log: 4.5, com: 1.05, logFl: 4.5, comFl: 1.05 };
+    return {
+      usd: 92,
+      rmb: 12.8,
+      log: 4.5,
+      com: 1.05,
+      logFl: 4.5,
+      comFl: 1.05,
+      importNds: 0.22,
+      importTax: 0.065,
+      flakonNds: 0.22,
+      flakonTax: 0.065
+    };
   }
 
-  var data = sheet.getRange(2, 1, 1, 6).getValues()[0];
+  var data = sheet.getRange(2, 1, 1, 10).getValues()[0];
   return {
     usd: hasValue_(data[0]) ? data[0] : 92,
     rmb: hasValue_(data[1]) ? data[1] : 12.8,
     log: hasValue_(data[2]) ? data[2] : 4.5,
     com: hasValue_(data[3]) ? data[3] : 1.05,
     logFl: hasValue_(data[4]) ? data[4] : (hasValue_(data[2]) ? data[2] : 4.5),
-    comFl: hasValue_(data[5]) ? data[5] : (hasValue_(data[3]) ? data[3] : 1.05)
+    comFl: hasValue_(data[5]) ? data[5] : (hasValue_(data[3]) ? data[3] : 1.05),
+    importNds: hasValue_(data[6]) ? data[6] : 0.22,
+    importTax: hasValue_(data[7]) ? data[7] : 0.065,
+    flakonNds: hasValue_(data[8]) ? data[8] : 0.22,
+    flakonTax: hasValue_(data[9]) ? data[9] : 0.065
   };
 }
 
@@ -218,17 +235,21 @@ function saveParams(p) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.BASIS) || ss.insertSheet(CFG.BASIS);
   sheet.clear();
-  sheet.getRange(1, 1, 1, 6)
-    .setValues([['USD', 'RMB', 'Логистика', 'Комиссия', 'Логистика_fl', 'Комиссия_fl']])
+  sheet.getRange(1, 1, 1, 10)
+    .setValues([['USD', 'RMB', 'Логистика', 'Комиссия', 'Логистика_fl', 'Комиссия_fl', 'НДС_импорт', 'Пошлина_импорт', 'НДС_флаконы', 'Пошлина_флаконы']])
     .setFontWeight('bold');
-  sheet.getRange(2, 1, 1, 6)
+  sheet.getRange(2, 1, 1, 10)
     .setValues([[
       hasValue_(coerceNumber_(p.usd)) ? coerceNumber_(p.usd) : 92,
       hasValue_(coerceNumber_(p.rmb)) ? coerceNumber_(p.rmb) : 12.8,
       hasValue_(coerceNumber_(p.log)) ? coerceNumber_(p.log) : 4.5,
       hasValue_(coerceNumber_(p.com)) ? coerceNumber_(p.com) : 1.05,
       hasValue_(coerceNumber_(p.logFl)) ? coerceNumber_(p.logFl) : (hasValue_(coerceNumber_(p.log)) ? coerceNumber_(p.log) : 4.5),
-      hasValue_(coerceNumber_(p.comFl)) ? coerceNumber_(p.comFl) : (hasValue_(coerceNumber_(p.com)) ? coerceNumber_(p.com) : 1.05)
+      hasValue_(coerceNumber_(p.comFl)) ? coerceNumber_(p.comFl) : (hasValue_(coerceNumber_(p.com)) ? coerceNumber_(p.com) : 1.05),
+      normalizeRateValue_(p.importNds, 0.22),
+      normalizeRateValue_(p.importTax, 0.065),
+      normalizeRateValue_(p.flakonNds, 0.22),
+      normalizeRateValue_(p.flakonTax, 0.065)
     ]]);
   return { success: true };
 }
@@ -275,8 +296,8 @@ function getFlakonList() {
       volume: matchedRow ? matchedRow[4] : '',
       weight: matchedRow ? matchedRow[12] : '',
       supplierPrice: matchedRow ? matchedRow[15] : '',
-      nds: 0.22,
-      tax: 0.065,
+      nds: params.flakonNds,
+      tax: params.flakonTax,
       label: 0
     };
     flakonMap[flakonName] = mergeFlakonRows_(imported, savedMap[flakonName]);
@@ -304,8 +325,8 @@ function saveFlakonData(flakons) {
       coerceNumber_(item.volume) || 0,
       coerceNumber_(item.weight) || 0,
       coerceNumber_(item.supplierPrice) || 0,
-      hasValue_(coerceNumber_(item.nds)) ? coerceNumber_(item.nds) : 0.22,
-      hasValue_(coerceNumber_(item.tax)) ? coerceNumber_(item.tax) : 0.065,
+      hasValue_(coerceNumber_(item.nds)) ? coerceNumber_(item.nds) : params.flakonNds,
+      hasValue_(coerceNumber_(item.tax)) ? coerceNumber_(item.tax) : params.flakonTax,
       coerceNumber_(item.label) || 0,
       coerceNumber_(item.rawFl) || 0,
       coerceNumber_(item.deliveryFl) || 0,
@@ -670,8 +691,8 @@ function normalizeStoredFlakonRow_(row, headers) {
     volume: row[1] || 0,
     weight: hasNewSchema ? row[2] || 0 : 0,
     supplierPrice: hasNewSchema ? row[3] || 0 : 0,
-    nds: hasNewSchema ? (hasValue_(row[4]) ? row[4] : 0.22) : (hasValue_(row[3]) ? row[3] : 0.22),
-    tax: hasNewSchema ? (hasValue_(row[5]) ? row[5] : 0.065) : 0.065,
+    nds: hasNewSchema ? (hasValue_(row[4]) ? row[4] : '') : (hasValue_(row[3]) ? row[3] : ''),
+    tax: hasNewSchema ? (hasValue_(row[5]) ? row[5] : '') : '',
     label: hasNewSchema ? (isCurrentOrder ? row[6] || 0 : row[9] || 0) : row[5] || 0
   };
 }
@@ -690,6 +711,7 @@ function mergeFlakonRows_(imported, saved) {
 }
 
 function recalculateFlakonList_(flakons, params) {
+  params = params || getParams();
   var result = [];
   for (var i = 0; i < flakons.length; i++) {
     var item = flakons[i] || {};
@@ -701,8 +723,8 @@ function recalculateFlakonList_(flakons, params) {
       volume: toNumber_(item.volume, 0),
       weight: toNumber_(item.weight, 0),
       supplierPrice: toNumber_(item.supplierPrice, 0),
-      nds: toNumber_(item.nds, 0.22),
-      tax: toNumber_(item.tax, 0.065),
+      nds: toNumber_(item.nds, params.flakonNds),
+      tax: toNumber_(item.tax, params.flakonTax),
       label: toNumber_(item.label, 0)
     };
     var metrics = calculateFlakonMetrics_(normalized, params || {});

@@ -634,7 +634,11 @@ function getParamsFromUI() {
     log: getNumericInputValue('p-log', 4.5),
     com: getNumericInputValue('p-com', 1.05),
     logFl: getNumericInputValue('p-log-fl', 4.5),
-    comFl: getNumericInputValue('p-com-fl', 1.05)
+    comFl: getNumericInputValue('p-com-fl', 1.05),
+    importNds: getNumericInputValue('p-import-nds', 0.22),
+    importTax: getNumericInputValue('p-import-tax', 0.065),
+    flakonNds: getNumericInputValue('p-flakon-nds', 0.22),
+    flakonTax: getNumericInputValue('p-flakon-tax', 0.065)
   };
 }
 
@@ -645,6 +649,16 @@ function setParamsToUI(p) {
   document.getElementById('p-com').value = p.com;
   document.getElementById('p-log-fl').value = p.logFl !== undefined && p.logFl !== null && p.logFl !== '' ? p.logFl : (p.log !== undefined && p.log !== null && p.log !== '' ? p.log : 4.5);
   document.getElementById('p-com-fl').value = p.comFl !== undefined && p.comFl !== null && p.comFl !== '' ? p.comFl : (p.com !== undefined && p.com !== null && p.com !== '' ? p.com : 1.05);
+  document.getElementById('p-import-nds').value = p.importNds !== undefined && p.importNds !== null && p.importNds !== '' ? p.importNds : 0.22;
+  document.getElementById('p-import-tax').value = p.importTax !== undefined && p.importTax !== null && p.importTax !== '' ? p.importTax : 0.065;
+  document.getElementById('p-flakon-nds').value = p.flakonNds !== undefined && p.flakonNds !== null && p.flakonNds !== '' ? p.flakonNds : 0.22;
+  document.getElementById('p-flakon-tax').value = p.flakonTax !== undefined && p.flakonTax !== null && p.flakonTax !== '' ? p.flakonTax : 0.065;
+  if (STATE.importSettings) {
+    STATE.importSettings.rateDefaults = {
+      nds: p.importNds !== undefined && p.importNds !== null && p.importNds !== '' ? p.importNds : 0.22,
+      tax: p.importTax !== undefined && p.importTax !== null && p.importTax !== '' ? p.importTax : 0.065
+    };
+  }
   STATE.params = p;
 }
 
@@ -665,6 +679,9 @@ function saveParamsUI() {
   google.script.run
     .withSuccessHandler(function() {
       STATE.params = p;
+      if (STATE.importSettings) {
+        STATE.importSettings.rateDefaults = { nds: p.importNds, tax: p.importTax };
+      }
       setStatus('params-status', 'Параметры сохранены', 'success');
     })
     .withFailureHandler(function(err) {

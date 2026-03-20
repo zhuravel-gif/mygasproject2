@@ -206,6 +206,42 @@ body.modal-open {
   margin-bottom: 12px;
 }
 
+.params-stack {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.param-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 16px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.param-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.param-main label {
+  font-weight: 600;
+  font-size: 12px;
+  color: #5f6368;
+}
+
+.param-help {
+  color: #475467;
+  line-height: 1.45;
+  font-size: 12px;
+  padding-top: 2px;
+}
+
 .param-group {
   display: flex;
   flex-direction: column;
@@ -754,6 +790,7 @@ body.modal-open {
 
 @media (max-width: 768px) {
   .params-grid,
+  .param-row,
   .mapping-row,
   .export-slicers {
     grid-template-columns: 1fr;

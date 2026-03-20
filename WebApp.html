@@ -99,32 +99,78 @@
   <div id="tab-params" class="tab-content active">
     <div class="card">
       <h2>Параметры расчёта</h2>
-      <p class="hint">Настройка валютных курсов, логистики и комиссии. НДС и пошлина теперь задаются в строках 1cData.</p>
+      <p class="hint">Сначала заполните параметры расчёта и дефолтные ставки для импорта и флаконов. Эти значения используются как исходные настройки на связанных вкладках.</p>
 
-      <div class="params-grid">
-        <div class="param-group">
-          <label>Курс USD</label>
-          <input id="p-usd" type="number" step="0.1" value="92">
+      <div class="params-stack">
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-usd">Курс USD</label>
+            <input id="p-usd" type="number" step="0.1" value="92">
+          </div>
+          <div class="param-help">Курс ЦБ РФ. Используется в расчёте доставки и себестоимости на вкладках Себестоимость, Калькулятор, Проверка и Флаконы.</div>
         </div>
-        <div class="param-group">
-          <label>Курс RMB</label>
-          <input id="p-rmb" type="number" step="0.1" value="12.8">
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-rmb">Курс RMB</label>
+            <input id="p-rmb" type="number" step="0.1" value="12.8">
+          </div>
+          <div class="param-help">Курс ЦБ РФ. Используется в расчёте закупочной стоимости товара и флаконов.</div>
         </div>
-        <div class="param-group">
-          <label>Логистика ($/кг)</label>
-          <input id="p-log" type="number" step="0.1" value="4.5">
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-log">Логистика</label>
+            <input id="p-log" type="number" step="0.1" value="4.5">
+          </div>
+          <div class="param-help">Ставка $ за кг за перевозку. Используется для обычных товарных позиций.</div>
         </div>
-        <div class="param-group">
-          <label>Комиссия (множитель)</label>
-          <input id="p-com" type="number" step="0.01" value="1.05">
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-com">Комиссия</label>
+            <input id="p-com" type="number" step="0.01" value="1.05">
+          </div>
+          <div class="param-help">Множитель 1,**. Показывает процент комиссии агентов за оплату товара или доставки.</div>
         </div>
-        <div class="param-group">
-          <label>Логистика * для флаконов</label>
-          <input id="p-log-fl" type="number" step="0.1" value="4.5">
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-log-fl">Логистика флаконы</label>
+            <input id="p-log-fl" type="number" step="0.1" value="4.5">
+          </div>
+          <div class="param-help">Ставка $ за кг за перевозку флаконов. Используется на вкладках Флаконы, Себестоимость, Калькулятор и Проверка.</div>
         </div>
-        <div class="param-group">
-          <label>Комиссия * для флаконов</label>
-          <input id="p-com-fl" type="number" step="0.01" value="1.05">
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-com-fl">Комиссия флаконы</label>
+            <input id="p-com-fl" type="number" step="0.01" value="1.05">
+          </div>
+          <div class="param-help">Множитель 1,**. Показывает процент комиссии агентов за оплату флаконов или доставки.</div>
+        </div>
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-import-nds">НДС для импорта</label>
+            <input id="p-import-nds" type="number" step="0.001" value="0.22">
+          </div>
+          <div class="param-help">Дефолтный НДС для первичного импорта номенклатуры. Подставляется в окно импорта и в новые строки 1cData.</div>
+        </div>
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-import-tax">Пошлина для импорта</label>
+            <input id="p-import-tax" type="number" step="0.001" value="0.065">
+          </div>
+          <div class="param-help">Дефолтная пошлина для первичного импорта номенклатуры. Подставляется в окно импорта и в новые строки 1cData.</div>
+        </div>
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-flakon-nds">НДС для флаконов</label>
+            <input id="p-flakon-nds" type="number" step="0.001" value="0.22">
+          </div>
+          <div class="param-help">Дефолтный НДС для новых строк на вкладке Флаконы и для флаконных расчётов по умолчанию.</div>
+        </div>
+        <div class="param-row">
+          <div class="param-main">
+            <label for="p-flakon-tax">Пошлина для флаконов</label>
+            <input id="p-flakon-tax" type="number" step="0.001" value="0.065">
+          </div>
+          <div class="param-help">Дефолтная пошлина для новых строк на вкладке Флаконы и для флаконных расчётов по умолчанию.</div>
         </div>
       </div>
 
