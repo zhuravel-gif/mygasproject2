@@ -682,7 +682,7 @@ function mergeFlakonRows_(imported, saved) {
     name: imported.name || saved.name || '',
     volume: hasValue_(imported.volume) ? imported.volume : saved.volume,
     weight: hasValue_(imported.weight) ? imported.weight : saved.weight,
-    supplierPrice: hasValue_(imported.supplierPrice) ? imported.supplierPrice : saved.supplierPrice,
+    supplierPrice: hasValue_(saved.supplierPrice) ? saved.supplierPrice : imported.supplierPrice,
     nds: hasValue_(saved.nds) ? saved.nds : imported.nds,
     tax: hasValue_(saved.tax) ? saved.tax : imported.tax,
     label: hasValue_(saved.label) ? saved.label : imported.label

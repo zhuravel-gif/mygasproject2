@@ -658,7 +658,7 @@ function renderFlakonsTable(flakons) {
       '<td>' + esc(f.name) + '</td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="volume" step="1" value="' + (f.volume||0) + '"></td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="weight" step="0.001" value="' + (f.weight||0) + '"></td>' +
-      '<td class="num readonly-cell">' + fmt(f.supplierPrice) + '</td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="supplierPrice" step="0.01" value="' + (f.supplierPrice||0) + '"></td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="nds" step="0.001" value="' + (f.nds||0) + '"></td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="tax" step="0.001" value="' + (f.tax||0) + '"></td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label||0) + '"></td>' +
@@ -679,10 +679,10 @@ function collectFlakonData() {
       name:     STATE.flakons[i].name,
       volume:   parseFloat(inputs[0].value) || 0,
       weight:   parseFloat(inputs[1].value) || 0,
-      supplierPrice: parseFloat(STATE.flakons[i].supplierPrice) || 0,
-      nds:      parseFloat(inputs[2].value) || 0,
-      tax:      parseFloat(inputs[3].value) || 0,
-      label:    parseFloat(inputs[4].value) || 0
+      supplierPrice: parseFloat(inputs[2].value) || 0,
+      nds:      parseFloat(inputs[3].value) || 0,
+      tax:      parseFloat(inputs[4].value) || 0,
+      label:    parseFloat(inputs[5].value) || 0
     });
   }
   return flakons;
