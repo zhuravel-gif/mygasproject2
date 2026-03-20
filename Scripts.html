@@ -24,7 +24,7 @@ function showTab(tabId) {
   document.querySelectorAll('.nav-tab').forEach(function(el) { el.classList.remove('active'); });
   document.getElementById('tab-' + tabId).classList.add('active');
   var tabs = document.querySelectorAll('.nav-tab');
-  var names = ['export','params','flakons','cost','calc','verify'];
+  var names = ['params','export','flakons','cost','calc','verify'];
   for (var i = 0; i < names.length; i++) {
     if (names[i] === tabId) tabs[i].classList.add('active');
   }
@@ -226,8 +226,9 @@ function showMappingModal(fileName, headers, rowCount) {
   document.getElementById('import-modal-subtitle').textContent =
     fileName + ' · ' + rowCount + ' строк данных';
 
-  var ndsDefault = document.getElementById('bulk-nds') ? document.getElementById('bulk-nds').value : '0.22';
-  var taxDefault = document.getElementById('bulk-tax') ? document.getElementById('bulk-tax').value : '0.065';
+  var rateDefaults = (STATE.importSettings && STATE.importSettings.rateDefaults) || { nds: 0.22, tax: 0.065 };
+  var ndsDefault = rateDefaults.nds;
+  var taxDefault = rateDefaults.tax;
 
   var html = '';
 
@@ -310,12 +311,6 @@ function confirmImport() {
 
     var nds = parseFloat(document.getElementById('modal-nds').value) || 0.22;
     var tax = parseFloat(document.getElementById('modal-tax').value) || 0.065;
-
-    // Обновить defaults в шапке вкладки
-    var ni = document.getElementById('bulk-nds');
-    var ti = document.getElementById('bulk-tax');
-    if (ni) ni.value = nds;
-    if (ti) ti.value = tax;
 
     // Построить массив данных в порядке FIELD_ORDER
     var fieldLabels = FIELD_ORDER.map(function(k) {
@@ -448,8 +443,15 @@ function flushNdsTaxUpdates() {
 }
 
 function applyRatesToAllUI() {
-  var nds = parseFloat(document.getElementById('bulk-nds').value);
-  var tax = parseFloat(document.getElementById('bulk-tax').value);
+  var ndsInput = document.getElementById('bulk-nds');
+  var taxInput = document.getElementById('bulk-tax');
+  if (!ndsInput || !taxInput) {
+    setStatus('export-status', 'Массовое применение НДС и Пошлины отключено в текущем интерфейсе.', 'info');
+    return;
+  }
+
+  var nds = parseFloat(ndsInput.value);
+  var tax = parseFloat(taxInput.value);
   if (isNaN(nds) || isNaN(tax)) { alert('Введите корректные значения НДС и Пошлины.'); return; }
 
   var confirmed = window.confirm(
@@ -1427,11 +1429,6 @@ function ensureImportSettings(callback) {
         mappings: { nomenclature: null, cost: null, supplier: null },
         rateDefaults: { nds: 0.22, tax: 0.065 }
       };
-      var defaults = STATE.importSettings.rateDefaults || { nds: 0.22, tax: 0.065 };
-      var ndsEl = document.getElementById('bulk-nds');
-      var taxEl = document.getElementById('bulk-tax');
-      if (ndsEl) ndsEl.value = defaults.nds;
-      if (taxEl) taxEl.value = defaults.tax;
       if (callback) callback();
     })
     .withFailureHandler(function(err) {
@@ -1842,8 +1839,6 @@ function confirmImport() {
       STATE.importSettings.mappings[STATE.importCtx.type] = payload.mapping;
       if (STATE.importCtx.type === 'nomenclature') {
         STATE.importSettings.rateDefaults = { nds: payload.defaults.nds, tax: payload.defaults.tax };
-        document.getElementById('bulk-nds').value = payload.defaults.nds;
-        document.getElementById('bulk-tax').value = payload.defaults.tax;
       }
       var details = '';
       if (res.matchedByName !== undefined || res.matchedByArticle !== undefined) {
