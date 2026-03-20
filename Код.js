@@ -1,5 +1,5 @@
 /**
- * ГЛАВНЫЙ ФАЙЛ — точка входа WebApp
+ * Main entry points for Apps Script WebApp.
  */
 
 function doGet() {
@@ -18,14 +18,13 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Калькулятор')
     .addItem('Открыть калькулятор', 'openWebApp')
-    .addItem('Экспорт данных в 1cData', 'exportToDataSheet')
     .addToUi();
 }
 
 function openWebApp() {
-  const html = HtmlService.createTemplateFromFile('WebApp')
+  var html = HtmlService.createTemplateFromFile('WebApp')
     .evaluate()
-    .setWidth(1200)
-    .setHeight(800);
+    .setWidth(1280)
+    .setHeight(860);
   SpreadsheetApp.getUi().showModalDialog(html, 'Калькулятор себестоимости');
 }

@@ -212,6 +212,39 @@ body.modal-open {
   border-color: #1a73e8;
 }
 
+.export-slicers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.export-slicer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.export-slicer label {
+  font-weight: 600;
+  font-size: 12px;
+  color: #5f6368;
+}
+
+.export-slicer select {
+  padding: 8px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.export-slicer select:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.18);
+}
+
 .filter-row {
   display: flex;
   gap: 8px;
@@ -613,7 +646,8 @@ body.modal-open {
 
 @media (max-width: 768px) {
   .params-grid,
-  .mapping-row {
+  .mapping-row,
+  .export-slicers {
     grid-template-columns: 1fr;
   }
 

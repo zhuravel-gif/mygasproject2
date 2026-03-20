@@ -470,7 +470,7 @@ function renderExportRows(rows) {
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
     var tr = document.createElement('tr');
-    tr.setAttribute('data-name', String(row[0] || '').toLowerCase());
+    tr.setAttribute('data-name', (String(row[0] || '') + ' ' + String(row[1] || '')).toLowerCase());
 
     for (var j = 0; j < row.length; j++) {
       var td = document.createElement('td');
@@ -936,4 +936,916 @@ window.addEventListener('load', function() {
   loadExportData();
   loadParamsUI();
 });
+
+// ============================================================
+// IMPORT OVERRIDES (V2)
+// ============================================================
+var IMPORT_CFG_V2 = {
+  nomenclature: {
+    title: 'Импорт из 1С номенклатуры',
+    endpoint: 'importBaseNomenclature',
+    needsRates: true,
+    fields: [
+      { key: 'name', label: 'Номенклатура.Наименование', required: true, hints: ['номенклатура.наименование', 'номенклатура', 'наименование'] },
+      { key: 'article', label: 'Артикул', required: false, hints: ['артикул'] },
+      { key: 'articleWb', label: 'Артикул ВБ', required: false, hints: ['артикул вб', 'вб', 'wildberries'] },
+      { key: 'category', label: 'Категория товаров', required: false, hints: ['категория'] },
+      { key: 'volume', label: 'Объем тары', required: false, hints: ['объем', 'объём', 'тары'] },
+      { key: 'group2', label: 'Товарная группа 2', required: false, hints: ['группа 2', 'товарная группа 2'] },
+      { key: 'group3', label: 'Товарная группа 3', required: false, hints: ['группа 3', 'товарная группа 3'] },
+      { key: 'raw', label: 'Основное сырьё', required: false, hints: ['основное сырье', 'основное сырьё', 'сырье', 'сырьё'] },
+      { key: 'flakon', label: 'Тара (флакон)', required: false, hints: ['тара', 'флакон'] },
+      { key: 'setQty', label: 'Количество в наборе', required: false, hints: ['количество', 'наборе', 'лаков в наборе'] },
+      { key: 'articleMp', label: 'Артикул МП', required: false, hints: ['артикул мп', 'мп'] },
+      { key: 'isSet', label: 'Это набор', required: false, hints: ['это набор', 'набор'] },
+      { key: 'weight', label: 'Вес (числитель)', required: false, hints: ['вес'] },
+      { key: 'group1', label: 'Товарная группа 1', required: false, hints: ['группа 1', 'товарная группа 1'] }
+    ]
+  },
+  cost: {
+    title: 'Импорт себестоимости текущей',
+    endpoint: 'importCurrentCost',
+    needsRates: false,
+    fields: [
+      { key: 'name', label: 'Номенклатура (для сопоставления)', required: false, hints: ['номенклатура', 'наименование'] },
+      { key: 'article', label: 'Артикул (резервный матчинг)', required: false, hints: ['артикул'] },
+      { key: 'value', label: 'Себестоимость 1С', required: true, hints: ['себестоимость', 'себес', 'стоимость'] }
+    ]
+  },
+  supplier: {
+    title: 'Импорт цены поставщика',
+    endpoint: 'importSupplierPriceData',
+    needsRates: false,
+    fields: [
+      { key: 'name', label: 'Номенклатура (для сопоставления)', required: false, hints: ['номенклатура', 'наименование'] },
+      { key: 'article', label: 'Артикул (резервный матчинг)', required: false, hints: ['артикул'] },
+      { key: 'value', label: 'Цена поставщика', required: true, hints: ['цена поставщика', 'цена', 'price'] }
+    ]
+  }
+};
+
+STATE.importSettings = STATE.importSettings || null;
+STATE.importCtx = STATE.importCtx || null;
+
+function ensureImportSettings(callback) {
+  if (STATE.importSettings) {
+    if (callback) callback();
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(settings) {
+      STATE.importSettings = settings || {
+        mappings: { nomenclature: null, cost: null, supplier: null },
+        rateDefaults: { nds: 0.22, tax: 0.065 }
+      };
+      var defaults = STATE.importSettings.rateDefaults || { nds: 0.22, tax: 0.065 };
+      var ndsEl = document.getElementById('bulk-nds');
+      var taxEl = document.getElementById('bulk-tax');
+      if (ndsEl) ndsEl.value = defaults.nds;
+      if (taxEl) taxEl.value = defaults.tax;
+      if (callback) callback();
+    })
+    .withFailureHandler(function(err) {
+      STATE.importSettings = {
+        mappings: { nomenclature: null, cost: null, supplier: null },
+        rateDefaults: { nds: 0.22, tax: 0.065 }
+      };
+      setStatus('export-status', 'Не удалось загрузить настройки импорта: ' + err.message, 'error');
+      if (callback) callback();
+    })
+    .getImportSettings();
+}
+
+function getSavedMappingV2(type) {
+  if (!STATE.importSettings || !STATE.importSettings.mappings) return null;
+  return STATE.importSettings.mappings[type] || null;
+}
+
+function normalizeKeyV2(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[._]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isValidIndexV2(index, length) {
+  return typeof index === 'number' && !isNaN(index) && index >= 0 && index < length;
+}
+
+function colLabelV2(index) {
+  var n = index + 1;
+  var out = '';
+  while (n > 0) {
+    var rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+function parseNumberV2(value) {
+  if (value === null || value === undefined || value === '') return null;
+  var parsed = parseFloat(String(value).replace(/\s+/g, '').replace(',', '.'));
+  return isNaN(parsed) ? null : parsed;
+}
+
+function toNumberSafe(value, fallback) {
+  var parsed = parseNumberV2(value);
+  return parsed === null ? fallback : parsed;
+}
+
+function startImport(type) {
+  ensureImportSettings(function() {
+    if (!IMPORT_CFG_V2[type]) {
+      setStatus('export-status', 'Неизвестный тип импорта.', 'error');
+      return;
+    }
+    if (typeof XLSX === 'undefined') {
+      setStatus('export-status', 'SheetJS не найден. Проверьте SheetJsLib.html.', 'error');
+      return;
+    }
+
+    STATE.importCtx = {
+      type: type,
+      workbook: null,
+      fileName: '',
+      sheetName: '',
+      headerRow: 1,
+      headers: [],
+      dataRows: [],
+      mapping: {}
+    };
+
+    var saved = getSavedMappingV2(type);
+    if (saved && saved.headerRow) {
+      var parsed = parseInt(saved.headerRow, 10);
+      if (parsed > 0) STATE.importCtx.headerRow = parsed;
+    }
+
+    var fi = document.getElementById('import-file-input');
+    fi.value = '';
+    fi.click();
+  });
+}
+
+function handleImportFileSelected(event) {
+  var input = event.target;
+  if (!input.files || !input.files[0] || !STATE.importCtx) return;
+  var file = input.files[0];
+
+  showLoading();
+  setStatus('export-status', 'Читаю файл: ' + file.name + '...', 'info');
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), {
+        type: 'array',
+        raw: false,
+        cellDates: false,
+        codepage: 1251
+      });
+      if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
+        throw new Error('В файле не найдено листов.');
+      }
+
+      STATE.importCtx.workbook = wb;
+      STATE.importCtx.fileName = file.name;
+      STATE.importCtx.sheetName = wb.SheetNames[0];
+
+      var saved = getSavedMappingV2(STATE.importCtx.type);
+      if (saved && saved.sheetName) {
+        for (var i = 0; i < wb.SheetNames.length; i++) {
+          if (normalizeKeyV2(wb.SheetNames[i]) === normalizeKeyV2(saved.sheetName)) {
+            STATE.importCtx.sheetName = wb.SheetNames[i];
+            break;
+          }
+        }
+      }
+
+      openImportModalV2();
+      hideLoading();
+    } catch (err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка чтения файла: ' + err.message, 'error');
+    }
+  };
+  reader.onerror = function() {
+    hideLoading();
+    setStatus('export-status', 'Ошибка чтения файла.', 'error');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function openImportModalV2() {
+  if (!STATE.importCtx || !STATE.importCtx.workbook) return;
+  var cfg = IMPORT_CFG_V2[STATE.importCtx.type];
+
+  document.getElementById('import-modal-title').textContent = cfg.title;
+  document.getElementById('import-file-name').textContent = STATE.importCtx.fileName;
+
+  var sheetSelect = document.getElementById('import-sheet-select');
+  sheetSelect.innerHTML = '';
+  for (var i = 0; i < STATE.importCtx.workbook.SheetNames.length; i++) {
+    var name = STATE.importCtx.workbook.SheetNames[i];
+    var opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === STATE.importCtx.sheetName) opt.selected = true;
+    sheetSelect.appendChild(opt);
+  }
+  document.getElementById('import-header-row').value = STATE.importCtx.headerRow;
+
+  var ratesBlock = document.getElementById('import-default-rates');
+  if (cfg.needsRates) {
+    ratesBlock.classList.remove('hidden');
+    var defaults = (STATE.importSettings && STATE.importSettings.rateDefaults) || { nds: 0.22, tax: 0.065 };
+    document.getElementById('import-default-nds').value = defaults.nds;
+    document.getElementById('import-default-tax').value = defaults.tax;
+  } else {
+    ratesBlock.classList.add('hidden');
+  }
+
+  document.getElementById('import-modal').classList.add('active');
+  document.body.classList.add('modal-open');
+  refreshImportPreview();
+}
+
+function refreshImportPreview() {
+  if (!STATE.importCtx || !STATE.importCtx.workbook) return;
+
+  STATE.importCtx.sheetName = document.getElementById('import-sheet-select').value;
+  STATE.importCtx.headerRow = parseInt(document.getElementById('import-header-row').value, 10) || 1;
+  if (STATE.importCtx.headerRow < 1) STATE.importCtx.headerRow = 1;
+
+  var ws = STATE.importCtx.workbook.Sheets[STATE.importCtx.sheetName];
+  if (!ws) return;
+  var rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+  if (!rows || rows.length === 0) rows = [[]];
+
+  var headerIdx = STATE.importCtx.headerRow - 1;
+  var rawHeaders = rows[headerIdx] || [];
+  var headers = [];
+  for (var i = 0; i < rawHeaders.length; i++) {
+    headers.push(String(rawHeaders[i] || '').trim() || ('Колонка ' + colLabelV2(i)));
+  }
+  STATE.importCtx.headers = headers;
+  STATE.importCtx.dataRows = rows.slice(STATE.importCtx.headerRow).filter(function(row) {
+    if (!row) return false;
+    for (var j = 0; j < row.length; j++) {
+      if (String(row[j] || '').trim() !== '') return true;
+    }
+    return false;
+  });
+
+  STATE.importCtx.mapping = buildMappingV2();
+  renderMappingControlsV2();
+  renderImportPreviewV2();
+
+  document.getElementById('import-modal-subtitle').textContent =
+    'Файл: ' + STATE.importCtx.fileName + ' · Лист: ' + STATE.importCtx.sheetName +
+    ' · Строк данных: ' + STATE.importCtx.dataRows.length;
+}
+
+function buildMappingV2() {
+  var cfg = IMPORT_CFG_V2[STATE.importCtx.type];
+  var headers = STATE.importCtx.headers;
+  var saved = getSavedMappingV2(STATE.importCtx.type);
+  var current = {};
+
+  for (var i = 0; i < cfg.fields.length; i++) {
+    var key = cfg.fields[i].key;
+    var sel = document.getElementById('map-' + key);
+    if (sel) current[key] = parseInt(sel.value, 10);
+  }
+
+  var mapping = {};
+  for (var f = 0; f < cfg.fields.length; f++) {
+    var field = cfg.fields[f];
+    var best = -1;
+    if (isValidIndexV2(current[field.key], headers.length)) {
+      best = current[field.key];
+    } else if (saved && saved.fields && saved.fields[field.key]) {
+      var savedField = saved.fields[field.key];
+      if (savedField.header) {
+        var targetHeader = normalizeKeyV2(savedField.header);
+        for (var h = 0; h < headers.length; h++) {
+          if (normalizeKeyV2(headers[h]) === targetHeader) { best = h; break; }
+        }
+      }
+      if (best < 0 && isValidIndexV2(parseInt(savedField.index, 10), headers.length)) {
+        best = parseInt(savedField.index, 10);
+      }
+    }
+    if (best < 0) {
+      for (var hintIdx = 0; hintIdx < field.hints.length; hintIdx++) {
+        var hint = normalizeKeyV2(field.hints[hintIdx]);
+        for (var j = 0; j < headers.length; j++) {
+          if (normalizeKeyV2(headers[j]).indexOf(hint) >= 0) { best = j; break; }
+        }
+        if (best >= 0) break;
+      }
+    }
+    mapping[field.key] = best;
+  }
+  return mapping;
+}
+
+function renderMappingControlsV2() {
+  var cfg = IMPORT_CFG_V2[STATE.importCtx.type];
+  var headers = STATE.importCtx.headers;
+  var html = '';
+
+  for (var i = 0; i < cfg.fields.length; i++) {
+    var field = cfg.fields[i];
+    html += '<div class="mapping-row">';
+    html += '<div><div class="mapping-label' + (field.required ? ' required' : '') + '">' + esc(field.label) + '</div>';
+    html += '<div class="mapping-hint">Сопоставление колонки файла</div></div>';
+    html += '<select id="map-' + field.key + '" class="mapping-select" onchange="onMappingChangedV2(\'' + field.key + '\', this.value)">';
+    html += '<option value="-1">— Не импортировать —</option>';
+    for (var j = 0; j < headers.length; j++) {
+      var selected = STATE.importCtx.mapping[field.key] === j ? ' selected' : '';
+      html += '<option value="' + j + '"' + selected + '>' + colLabelV2(j) + ': ' + esc(headers[j]) + '</option>';
+    }
+    html += '</select>';
+    html += '</div>';
+  }
+
+  document.getElementById('import-mapping-grid').innerHTML = html;
+}
+
+function onMappingChangedV2(key, value) {
+  STATE.importCtx.mapping[key] = parseInt(value, 10);
+  renderImportPreviewV2();
+}
+
+function renderImportPreviewV2() {
+  var headers = STATE.importCtx.headers;
+  var rows = STATE.importCtx.dataRows;
+  var mappedCols = {};
+  for (var key in STATE.importCtx.mapping) {
+    if (!STATE.importCtx.mapping.hasOwnProperty(key)) continue;
+    var idx = STATE.importCtx.mapping[key];
+    if (isValidIndexV2(idx, headers.length)) mappedCols[idx] = true;
+  }
+
+  var thead = document.getElementById('import-preview-head');
+  var tbody = document.getElementById('import-preview-body');
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+
+  var headRow = document.createElement('tr');
+  for (var i = 0; i < headers.length; i++) {
+    var th = document.createElement('th');
+    th.textContent = colLabelV2(i) + ': ' + headers[i];
+    if (mappedCols[i]) th.style.background = '#dce8ff';
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+
+  var previewCount = Math.min(rows.length, 20);
+  if (previewCount === 0) {
+    var trEmpty = document.createElement('tr');
+    var tdEmpty = document.createElement('td');
+    tdEmpty.colSpan = Math.max(headers.length, 1);
+    tdEmpty.textContent = 'Нет строк данных для предпросмотра.';
+    trEmpty.appendChild(tdEmpty);
+    tbody.appendChild(trEmpty);
+    return;
+  }
+
+  for (var r = 0; r < previewCount; r++) {
+    var tr = document.createElement('tr');
+    var row = rows[r] || [];
+    for (var c = 0; c < headers.length; c++) {
+      var td = document.createElement('td');
+      td.textContent = row[c] === null || row[c] === undefined ? '' : String(row[c]);
+      if (mappedCols[c]) td.style.background = '#f5f9ff';
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function confirmImport() {
+  if (!STATE.importCtx) return;
+  var cfg = IMPORT_CFG_V2[STATE.importCtx.type];
+  var mapping = {};
+  for (var i = 0; i < cfg.fields.length; i++) {
+    var key = cfg.fields[i].key;
+    var sel = document.getElementById('map-' + key);
+    mapping[key] = sel ? parseInt(sel.value, 10) : -1;
+  }
+
+  for (var req = 0; req < cfg.fields.length; req++) {
+    if (cfg.fields[req].required && !isValidIndexV2(mapping[cfg.fields[req].key], STATE.importCtx.headers.length)) {
+      alert('Не заполнено обязательное поле: ' + cfg.fields[req].label);
+      return;
+    }
+  }
+  if ((STATE.importCtx.type === 'cost' || STATE.importCtx.type === 'supplier') &&
+      !isValidIndexV2(mapping.name, STATE.importCtx.headers.length) &&
+      !isValidIndexV2(mapping.article, STATE.importCtx.headers.length)) {
+    alert('Для сопоставления укажите колонку Номенклатура или Артикул.');
+    return;
+  }
+
+  var payload;
+  if (STATE.importCtx.type === 'nomenclature') {
+    var rows = [];
+    for (var r = 0; r < STATE.importCtx.dataRows.length; r++) {
+      var src = STATE.importCtx.dataRows[r];
+      var item = {};
+      for (var f = 0; f < cfg.fields.length; f++) {
+        var field = cfg.fields[f];
+        var idx = mapping[field.key];
+        item[field.key] = isValidIndexV2(idx, STATE.importCtx.headers.length) ? String(src[idx] || '').trim() : '';
+      }
+      if (!item.name) continue;
+      rows.push(item);
+    }
+    if (!rows.length) {
+      alert('После фильтрации не осталось строк с номенклатурой.');
+      return;
+    }
+    payload = {
+      rows: rows,
+      defaults: {
+        nds: toNumberSafe(document.getElementById('import-default-nds').value, 0.22),
+        tax: toNumberSafe(document.getElementById('import-default-tax').value, 0.065)
+      },
+      mapping: buildMappingPayloadV2(mapping)
+    };
+  } else {
+    var mappedRows = [];
+    for (var iRow = 0; iRow < STATE.importCtx.dataRows.length; iRow++) {
+      var srcRow = STATE.importCtx.dataRows[iRow];
+      var name = isValidIndexV2(mapping.name, STATE.importCtx.headers.length) ? String(srcRow[mapping.name] || '').trim() : '';
+      var article = isValidIndexV2(mapping.article, STATE.importCtx.headers.length) ? String(srcRow[mapping.article] || '').trim() : '';
+      var value = isValidIndexV2(mapping.value, STATE.importCtx.headers.length) ? parseNumberV2(srcRow[mapping.value]) : null;
+      if (!name && !article) continue;
+      if (value === null) continue;
+      mappedRows.push({ name: name, article: article, value: value });
+    }
+    if (!mappedRows.length) {
+      alert('Не найдено валидных строк для импорта.');
+      return;
+    }
+    payload = {
+      rows: mappedRows,
+      mapping: buildMappingPayloadV2(mapping)
+    };
+  }
+
+  closeImportModal();
+  showLoading();
+  setStatus('export-status', 'Импортирую данные...', 'info');
+
+  var runner = google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('export-status', (res && res.message) || 'Импорт завершился с ошибкой.', 'error');
+        return;
+      }
+      STATE.importSettings = STATE.importSettings || { mappings: {}, rateDefaults: { nds: 0.22, tax: 0.065 } };
+      STATE.importSettings.mappings[STATE.importCtx.type] = payload.mapping;
+      if (STATE.importCtx.type === 'nomenclature') {
+        STATE.importSettings.rateDefaults = { nds: payload.defaults.nds, tax: payload.defaults.tax };
+        document.getElementById('bulk-nds').value = payload.defaults.nds;
+        document.getElementById('bulk-tax').value = payload.defaults.tax;
+      }
+      var details = '';
+      if (res.matchedByName !== undefined || res.matchedByArticle !== undefined) {
+        details = ' (по наименованию: ' + (res.matchedByName || 0) + ', по артикулу: ' + (res.matchedByArticle || 0) + ')';
+      }
+      setStatus('export-status', res.message + details, 'success');
+      loadExportData();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка импорта: ' + err.message, 'error');
+    });
+
+  if (cfg.endpoint === 'importBaseNomenclature') runner.importBaseNomenclature(payload);
+  if (cfg.endpoint === 'importCurrentCost') runner.importCurrentCost(payload);
+  if (cfg.endpoint === 'importSupplierPriceData') runner.importSupplierPriceData(payload);
+}
+
+function buildMappingPayloadV2(mapping) {
+  var fields = {};
+  for (var key in mapping) {
+    if (!mapping.hasOwnProperty(key)) continue;
+    var idx = mapping[key];
+    fields[key] = {
+      index: isValidIndexV2(idx, STATE.importCtx.headers.length) ? idx : -1,
+      header: isValidIndexV2(idx, STATE.importCtx.headers.length) ? STATE.importCtx.headers[idx] : ''
+    };
+  }
+  return {
+    fileName: STATE.importCtx.fileName,
+    sheetName: STATE.importCtx.sheetName,
+    headerRow: STATE.importCtx.headerRow,
+    fields: fields
+  };
+}
+
+function filterExportTable() {
+  var query = document.getElementById('export-search').value.toLowerCase();
+  var rows = document.querySelectorAll('#export-tbody tr');
+  for (var i = 0; i < rows.length; i++) {
+    var haystack = rows[i].getAttribute('data-name') || '';
+    rows[i].style.display = (!query || haystack.indexOf(query) >= 0) ? '' : 'none';
+  }
+}
+
+function onCalcSelect() {
+  var idx = document.getElementById('calc-select').value;
+  if (idx === '' || !STATE.exportData) return;
+  var row = STATE.exportData.rows[parseInt(idx, 10)];
+  if (!row) return;
+
+  var isSet = String(row[11] || '').trim();
+  var hasRaw = row[7] && String(row[7]).trim() !== '';
+  var type = isSet === 'Да' ? 'Наборы' : (!hasRaw ? 'Готовый товар' : 'Сырьё');
+
+  document.getElementById('calc-type').value = type;
+  document.getElementById('calc-price').value = parseFloat(row[15]) || 0;
+  document.getElementById('calc-vol').value = parseFloat(row[4]) || 0;
+  document.getElementById('calc-weight').value = parseFloat(row[12]) || 0;
+  document.getElementById('calc-flakon').value = String(row[8] || '').trim();
+  document.getElementById('calc-nds').value = parseFloat(row[16]) || 0.22;
+  document.getElementById('calc-tax').value = parseFloat(row[17]) || 0.065;
+  document.getElementById('calc-cost1c').value = parseFloat(row[14]) || 0;
+  calcManual();
+}
+
+window.addEventListener('load', function() {
+  ensureImportSettings(function() {});
+});
+
+// ============================================================
+// IMPORT TAB OVERRIDES (V3)
+// ============================================================
+var EXPORT_SCHEMA_COLS = 18;
+var EXPORT_SLICER_EXCLUDED = {
+  0: true,   // Номенклатура
+  1: true,   // Артикул
+  2: true,   // Артикул ВБ
+  15: true   // Цена поставщика
+};
+var EXPORT_NUMERIC_COLS = {
+  4: true,   // Объем тары
+  9: true,   // Количество в наборе
+  12: true,  // Вес
+  14: true,  // Себестоимость 1С
+  15: true   // Цена поставщика
+};
+
+STATE.exportFilters = STATE.exportFilters || {};
+
+function getExportColCountV3(data) {
+  if (!data || !data.headers) return 0;
+  return Math.min(data.headers.length, EXPORT_SCHEMA_COLS);
+}
+
+function getVisibleExportHeadersV3(data) {
+  return (data && data.headers ? data.headers : []).slice(0, getExportColCountV3(data));
+}
+
+function getVisibleExportRowV3(row, colCount) {
+  var out = [];
+  for (var i = 0; i < colCount; i++) out.push(row[i]);
+  return out;
+}
+
+function normalizeExportValueV3(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function isFilterableExportColV3(index) {
+  return !EXPORT_SLICER_EXCLUDED[index];
+}
+
+function getExportSearchQueryV3() {
+  var input = document.getElementById('export-search');
+  return input ? String(input.value || '').toLowerCase().trim() : '';
+}
+
+function getExportSearchHaystackV3(row) {
+  return [
+    normalizeExportValueV3(row[0]),
+    normalizeExportValueV3(row[1]),
+    normalizeExportValueV3(row[2])
+  ].join(' ').toLowerCase();
+}
+
+function sanitizeExportFiltersV3(data) {
+  var rows = data && data.rows ? data.rows : [];
+  var colCount = getExportColCountV3(data);
+  var valid = {};
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = getVisibleExportRowV3(rows[i], colCount);
+    for (var c = 0; c < colCount; c++) {
+      if (!isFilterableExportColV3(c)) continue;
+      var key = normalizeExportValueV3(row[c]);
+      if (!key) continue;
+      if (!valid[c]) valid[c] = {};
+      valid[c][key] = true;
+    }
+  }
+
+  var next = {};
+  for (var filterCol in STATE.exportFilters) {
+    if (!STATE.exportFilters.hasOwnProperty(filterCol)) continue;
+    var value = STATE.exportFilters[filterCol];
+    if (!value) continue;
+    if (valid[filterCol] && valid[filterCol][value]) next[filterCol] = value;
+  }
+  STATE.exportFilters = next;
+}
+
+function buildExportSlicerDefsV3(data) {
+  var headers = getVisibleExportHeadersV3(data);
+  var rows = data && data.rows ? data.rows : [];
+  var defs = [];
+
+  for (var c = 0; c < headers.length; c++) {
+    if (!isFilterableExportColV3(c)) continue;
+    var values = {};
+    for (var r = 0; r < rows.length; r++) {
+      var value = normalizeExportValueV3(rows[r][c]);
+      if (!value) continue;
+      values[value] = true;
+    }
+
+    var options = Object.keys(values).sort(function(a, b) {
+      return a.localeCompare(b, 'ru', { sensitivity: 'base', numeric: true });
+    });
+
+    defs.push({
+      index: c,
+      label: headers[c],
+      options: options
+    });
+  }
+
+  return defs;
+}
+
+function renderExportSlicersV3(data) {
+  var host = document.getElementById('export-slicers');
+  if (!host) return;
+  host.innerHTML = '';
+
+  if (!data || !data.rows || data.rows.length === 0) return;
+
+  sanitizeExportFiltersV3(data);
+  var defs = buildExportSlicerDefsV3(data);
+  if (!defs.length) return;
+
+  for (var i = 0; i < defs.length; i++) {
+    var def = defs[i];
+    var wrap = document.createElement('div');
+    wrap.className = 'export-slicer';
+
+    var label = document.createElement('label');
+    label.textContent = def.label;
+    wrap.appendChild(label);
+
+    var select = document.createElement('select');
+    select.setAttribute('data-col', def.index);
+
+    var allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = 'Все значения';
+    select.appendChild(allOpt);
+
+    for (var j = 0; j < def.options.length; j++) {
+      var opt = document.createElement('option');
+      opt.value = def.options[j];
+      opt.textContent = def.options[j];
+      if (STATE.exportFilters[String(def.index)] === def.options[j]) opt.selected = true;
+      select.appendChild(opt);
+    }
+
+    select.addEventListener('change', function() {
+      var colIndex = String(this.getAttribute('data-col'));
+      if (this.value) STATE.exportFilters[colIndex] = this.value;
+      else delete STATE.exportFilters[colIndex];
+      renderExportRows(getFilteredExportEntriesV3());
+    });
+
+    wrap.appendChild(select);
+    host.appendChild(wrap);
+  }
+}
+
+function getFilteredExportEntriesV3() {
+  if (!STATE.exportData || !STATE.exportData.rows) return [];
+
+  var rows = STATE.exportData.rows;
+  var colCount = getExportColCountV3(STATE.exportData);
+  var query = getExportSearchQueryV3();
+  var entries = [];
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = getVisibleExportRowV3(rows[i], colCount);
+    if (query && getExportSearchHaystackV3(row).indexOf(query) < 0) continue;
+
+    var matches = true;
+    for (var filterCol in STATE.exportFilters) {
+      if (!STATE.exportFilters.hasOwnProperty(filterCol)) continue;
+      var filterValue = STATE.exportFilters[filterCol];
+      if (!filterValue) continue;
+      if (normalizeExportValueV3(row[parseInt(filterCol, 10)]) !== filterValue) {
+        matches = false;
+        break;
+      }
+    }
+    if (!matches) continue;
+
+    entries.push({
+      index: i,
+      row: row
+    });
+  }
+
+  return entries;
+}
+
+function renderExportTable(data) {
+  if (!data || !data.headers) return;
+
+  STATE.exportData = data;
+  sanitizeExportFiltersV3(data);
+
+  var headers = getVisibleExportHeadersV3(data);
+  var thead = document.getElementById('export-thead');
+  var tbody = document.getElementById('export-tbody');
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    var full = String(headers[h] || '');
+    th.textContent = full.length > 30 ? full.substring(0, 28) + '...' : full;
+    th.title = full;
+    if (h === EXPORT_NDS_COL || h === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
+    thead.appendChild(th);
+  }
+
+  renderExportSlicersV3(data);
+  renderExportRows(getFilteredExportEntriesV3());
+}
+
+function renderExportRows(entries) {
+  var tbody = document.getElementById('export-tbody');
+  tbody.innerHTML = '';
+
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    var row = entry.row;
+    var originalIndex = entry.index;
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-name', getExportSearchHaystackV3(row));
+
+    for (var j = 0; j < row.length; j++) {
+      var td = document.createElement('td');
+
+      if (j === EXPORT_NDS_COL || j === EXPORT_TAX_COL) {
+        var field = j === EXPORT_NDS_COL ? 'nds' : 'tax';
+        var inp = document.createElement('input');
+        var inputValue = normalizeExportValueV3(row[j]);
+        inp.type = 'number';
+        inp.className = 'rate-input nds-tax-input';
+        inp.step = '0.001';
+        if (inputValue === '') inputValue = j === EXPORT_NDS_COL ? '0.22' : '0.065';
+        inp.value = inputValue;
+        inp.setAttribute('data-row', originalIndex);
+        inp.setAttribute('data-field', field);
+        td.style.background = '#f1f8e9';
+        td.style.padding = '2px 6px';
+        (function(el, rowIndex, fieldName, colIndex) {
+          el.addEventListener('input', function() {
+            this.classList.add('dirty');
+            if (STATE.exportData && STATE.exportData.rows && STATE.exportData.rows[rowIndex]) {
+              STATE.exportData.rows[rowIndex][colIndex] = this.value;
+            }
+          });
+          el.addEventListener('change', function() {
+            onNdsTaxChange(rowIndex, fieldName, this.value);
+          });
+        })(inp, originalIndex, field, j);
+        td.appendChild(inp);
+      } else {
+        var val = row[j];
+        if (EXPORT_NUMERIC_COLS[j]) {
+          var parsed = parseNumberV2(val);
+          if (parsed !== null) {
+            td.className = 'num';
+            td.textContent = parsed % 1 === 0 ? String(parsed) : parsed.toFixed(2);
+          } else {
+            td.textContent = normalizeExportValueV3(val);
+          }
+        } else {
+          td.textContent = normalizeExportValueV3(val);
+        }
+      }
+
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+}
+
+function filterExportTable() {
+  renderExportRows(getFilteredExportEntriesV3());
+}
+
+function renderExportStats(data) {
+  if (!data || !data.rows) return;
+
+  var total = data.rows.length;
+  var types = { raw: 0, finished: 0, sets: 0 };
+  var withCost = 0;
+  var withPrice = 0;
+
+  for (var i = 0; i < data.rows.length; i++) {
+    var row = data.rows[i];
+    var isSet = normalizeExportValueV3(row[11]);
+    var hasRaw = normalizeExportValueV3(row[7]) !== '';
+    if (isSet === 'Да') types.sets++;
+    else if (!hasRaw) types.finished++;
+    else types.raw++;
+    if (parseNumberV2(row[14]) !== null && parseNumberV2(row[14]) > 0) withCost++;
+    if (parseNumberV2(row[15]) !== null && parseNumberV2(row[15]) > 0) withPrice++;
+  }
+
+  document.getElementById('export-stats').innerHTML =
+    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Всего: ' + total + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + types.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Готовый товар: ' + types.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + types.sets + '</span>' +
+    '<span class="stat-item">|</span>' +
+    '<span class="stat-item">Себес 1С: <b>' + withCost + '</b></span>' +
+    '<span class="stat-item">Цена пост.: <b>' + withPrice + '</b></span>';
+}
+
+function exportCSV() {
+  if (!STATE.exportData || !STATE.exportData.rows || !STATE.exportData.rows.length) {
+    setStatus('export-status', 'Нет данных для экспорта', 'error');
+    return;
+  }
+
+  var headers = getVisibleExportHeadersV3(STATE.exportData);
+  var rows = [];
+  rows.push(headers.join(';'));
+
+  for (var i = 0; i < STATE.exportData.rows.length; i++) {
+    var row = getVisibleExportRowV3(STATE.exportData.rows[i], headers.length);
+    rows.push(row.map(function(v) {
+      var value = v === null || v === undefined ? '' : String(v);
+      return '"' + value.replace(/"/g, '""') + '"';
+    }).join(';'));
+  }
+
+  var blob = new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'export_1cData.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function flushNdsTaxUpdates() {
+  var updates = [];
+  for (var rowIdx in NDS_TAX_PENDING) {
+    if (!NDS_TAX_PENDING.hasOwnProperty(rowIdx)) continue;
+    var item = NDS_TAX_PENDING[rowIdx];
+    var update = { row: parseInt(rowIdx, 10) };
+    if (item.nds !== undefined) update.nds = item.nds;
+    if (item.tax !== undefined) update.tax = item.tax;
+    updates.push(update);
+  }
+
+  NDS_TAX_PENDING = {};
+  if (!updates.length) return;
+
+  google.script.run
+    .withSuccessHandler(function() {
+      var inputs = document.querySelectorAll('.nds-tax-input.dirty');
+      for (var i = 0; i < inputs.length; i++) inputs[i].classList.remove('dirty');
+      setStatus('export-status', '✓ НДС/Пошлина сохранены (' + updates.length + ' строк)', 'success');
+    })
+    .withFailureHandler(function(err) {
+      setStatus('export-status', 'Ошибка сохранения НДС/Пошлины: ' + err.message, 'error');
+    })
+    .updateNdsTax(updates);
+}
 </script>
