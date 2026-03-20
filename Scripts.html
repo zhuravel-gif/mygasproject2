@@ -725,6 +725,26 @@ function saveFlakonDataUI() {
 // ============================================================
 // TAB 4: СЕБЕСТОИМОСТЬ
 // ============================================================
+var COST_COLUMNS = [
+  { key: 'name', label: 'Номенклатура', numeric: false, filterable: false },
+  { key: 'type', label: 'Тип', numeric: false, filterable: true },
+  { key: 'raw', label: 'Сырьё', numeric: true, filterable: true },
+  { key: 'taxDuty', label: 'Нал+Пош', numeric: true, filterable: true },
+  { key: 'delivery', label: 'Доставка', numeric: true, filterable: true },
+  { key: 'rawFl', label: 'Цена фл.', numeric: true, filterable: true },
+  { key: 'deliveryFl', label: 'Дост. фл.', numeric: true, filterable: true },
+  { key: 'taxDutyFl', label: 'НДС+пошл. фл.', numeric: true, filterable: true },
+  { key: 'label', label: 'Этикетка', numeric: true, filterable: true },
+  { key: 'totalFl', label: 'Себес. фл.', numeric: true, filterable: true },
+  { key: 'total', label: 'ИТОГО', numeric: true, filterable: true },
+  { key: 'cost1C', label: 'Себес 1С', numeric: true, filterable: true },
+  { key: 'diff', label: 'Разница', numeric: true, filterable: true },
+  { key: 'diffPct', label: '%', numeric: true, filterable: true }
+];
+
+STATE.costFilters = STATE.costFilters || {};
+STATE.costSort = STATE.costSort || { key: null, dir: 'asc' };
+
 function runCalculation() {
   var p = getParamsFromUI();
   showLoading();
@@ -802,6 +822,308 @@ function renderCostStats(results) {
     '<span class="stat-item">|</span>' +
     '<span class="stat-item">Расчёт: <b>' + fmt(totals.totalCost) + '</b></span>' +
     '<span class="stat-item">1С: <b>' + fmt(totals.total1C) + '</b></span>';
+}
+
+function getCostSearchQuery() {
+  var input = document.getElementById('cost-search');
+  return input ? String(input.value || '').toLowerCase().trim() : '';
+}
+
+function getCostSearchHaystack(result) {
+  return [
+    String(result.name || ''),
+    String(result.type || '')
+  ].join(' ').toLowerCase();
+}
+
+function getCostRawValue(result, key) {
+  if (!result) return null;
+  if (key === 'diffPct') return result.cost1C > 0 ? result.diffPct : null;
+  return result[key];
+}
+
+function getCostDisplayValue(result, key) {
+  if (key === 'name') return String(result.name || '');
+  if (key === 'type') return String(result.type || '');
+  if (key === 'diffPct') return result.cost1C > 0 ? (result.diffPct * 100).toFixed(1) + '%' : '—';
+  return fmt(result[key]);
+}
+
+function getCostFilterValue(result, key) {
+  var display = getCostDisplayValue(result, key);
+  return display === '—' ? '' : String(display).trim();
+}
+
+function getCostSortIndicator(key) {
+  if (STATE.costSort.key !== key) return ' ↕';
+  return STATE.costSort.dir === 'asc' ? ' ↑' : ' ↓';
+}
+
+function sanitizeCostFilters() {
+  var valid = {};
+  var results = STATE.calcResults || [];
+
+  for (var i = 0; i < results.length; i++) {
+    for (var j = 0; j < COST_COLUMNS.length; j++) {
+      var col = COST_COLUMNS[j];
+      if (!col.filterable) continue;
+      var value = getCostFilterValue(results[i], col.key);
+      if (!value) continue;
+      if (!valid[col.key]) valid[col.key] = {};
+      valid[col.key][value] = true;
+    }
+  }
+
+  var next = {};
+  for (var key in STATE.costFilters) {
+    if (!STATE.costFilters.hasOwnProperty(key)) continue;
+    var selected = STATE.costFilters[key];
+    if (selected && valid[key] && valid[key][selected]) next[key] = selected;
+  }
+  STATE.costFilters = next;
+}
+
+function renderCostHeaders() {
+  var thead = document.getElementById('cost-thead');
+  if (!thead) return;
+  thead.innerHTML = '';
+
+  for (var i = 0; i < COST_COLUMNS.length; i++) {
+    var col = COST_COLUMNS[i];
+    var th = document.createElement('th');
+    th.className = 'sortable-col';
+    if (col.key === 'total') th.classList.add('col-total');
+    th.textContent = col.label + getCostSortIndicator(col.key);
+    th.setAttribute('data-key', col.key);
+    th.addEventListener('click', function() {
+      toggleCostSort(this.getAttribute('data-key'));
+    });
+    thead.appendChild(th);
+  }
+}
+
+function buildCostSlicerDefs() {
+  var results = STATE.calcResults || [];
+  var defs = [];
+
+  for (var i = 0; i < COST_COLUMNS.length; i++) {
+    var col = COST_COLUMNS[i];
+    if (!col.filterable) continue;
+
+    var values = {};
+    for (var j = 0; j < results.length; j++) {
+      var value = getCostFilterValue(results[j], col.key);
+      if (!value) continue;
+      values[value] = true;
+    }
+
+    var options = Object.keys(values).sort(function(a, b) {
+      var aNum = parseNumberV2(a);
+      var bNum = parseNumberV2(b);
+      if (col.numeric && aNum !== null && bNum !== null) return aNum - bNum;
+      return a.localeCompare(b, 'ru', { sensitivity: 'base', numeric: true });
+    });
+
+    defs.push({
+      key: col.key,
+      label: col.label,
+      options: options
+    });
+  }
+
+  return defs;
+}
+
+function renderCostSlicers() {
+  var host = document.getElementById('cost-slicers');
+  if (!host) return;
+  host.innerHTML = '';
+
+  if (!STATE.calcResults || !STATE.calcResults.length) return;
+
+  sanitizeCostFilters();
+  var defs = buildCostSlicerDefs();
+  for (var i = 0; i < defs.length; i++) {
+    var def = defs[i];
+    var wrap = document.createElement('div');
+    wrap.className = 'export-slicer';
+
+    var label = document.createElement('label');
+    label.textContent = def.label;
+    wrap.appendChild(label);
+
+    var select = document.createElement('select');
+    select.setAttribute('data-key', def.key);
+
+    var allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = 'Все значения';
+    select.appendChild(allOpt);
+
+    for (var j = 0; j < def.options.length; j++) {
+      var opt = document.createElement('option');
+      opt.value = def.options[j];
+      opt.textContent = def.options[j];
+      if (STATE.costFilters[def.key] === def.options[j]) opt.selected = true;
+      select.appendChild(opt);
+    }
+
+    select.addEventListener('change', function() {
+      var key = this.getAttribute('data-key');
+      if (this.value) STATE.costFilters[key] = this.value;
+      else delete STATE.costFilters[key];
+      renderCostRows(getFilteredCostResults());
+    });
+
+    wrap.appendChild(select);
+    host.appendChild(wrap);
+  }
+}
+
+function compareCostResults(a, b, key) {
+  var av = getCostRawValue(a, key);
+  var bv = getCostRawValue(b, key);
+  var aNum = parseNumberV2(av);
+  var bNum = parseNumberV2(bv);
+
+  if (aNum !== null && bNum !== null) return aNum - bNum;
+
+  var aText = String(getCostDisplayValue(a, key) || '').trim();
+  var bText = String(getCostDisplayValue(b, key) || '').trim();
+  if (!aText && !bText) return 0;
+  if (!aText) return 1;
+  if (!bText) return -1;
+  return aText.localeCompare(bText, 'ru', { sensitivity: 'base', numeric: true });
+}
+
+function toggleCostSort(key) {
+  if (STATE.costSort.key === key) {
+    STATE.costSort.dir = STATE.costSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    STATE.costSort.key = key;
+    STATE.costSort.dir = 'asc';
+  }
+  renderCostTable();
+}
+
+function getFilteredCostResults() {
+  if (!STATE.calcResults || !STATE.calcResults.length) return [];
+
+  var query = getCostSearchQuery();
+  var typeFilter = document.getElementById('cost-type-filter').value;
+  var out = [];
+
+  for (var i = 0; i < STATE.calcResults.length; i++) {
+    var result = STATE.calcResults[i];
+    if (query && getCostSearchHaystack(result).indexOf(query) < 0) continue;
+    if (typeFilter && result.type !== typeFilter) continue;
+
+    var matches = true;
+    for (var key in STATE.costFilters) {
+      if (!STATE.costFilters.hasOwnProperty(key)) continue;
+      if (getCostFilterValue(result, key) !== STATE.costFilters[key]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) out.push(result);
+  }
+
+  if (STATE.costSort.key) {
+    out.sort(function(a, b) {
+      var cmp = compareCostResults(a, b, STATE.costSort.key);
+      return STATE.costSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }
+
+  return out;
+}
+
+function renderCostRows(results) {
+  var tbody = document.getElementById('cost-tbody');
+  tbody.innerHTML = '';
+
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var diffClass = r.diff > 0 ? 'diff-pos' : (r.diff < 0 ? 'diff-neg' : 'diff-zero');
+    var badgeClass = r.type === 'Сырьё' ? 'badge-raw' : (r.type === 'Готовый товар' ? 'badge-finished' : 'badge-set');
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-type', r.type);
+    tr.setAttribute('data-name', getCostSearchHaystack(r));
+
+    for (var j = 0; j < COST_COLUMNS.length; j++) {
+      var col = COST_COLUMNS[j];
+      var td = document.createElement('td');
+
+      if (col.key === 'name') {
+        td.textContent = r.name || '';
+      } else if (col.key === 'type') {
+        td.innerHTML = '<span class="badge ' + badgeClass + '">' + esc(r.type) + '</span>';
+      } else {
+        var rawValue = getCostRawValue(r, col.key);
+        td.className = 'num';
+        td.textContent = getCostDisplayValue(r, col.key);
+        if (col.key === 'total') td.classList.add('col-total');
+        if (col.key === 'diff' || col.key === 'diffPct') td.classList.add(diffClass);
+        if (rawValue !== null && parseNumberV2(rawValue) === 0) td.classList.add('zero-value');
+      }
+
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+}
+
+function renderCostTable(results) {
+  if (results) STATE.calcResults = results;
+  renderCostHeaders();
+  renderCostSlicers();
+  renderCostRows(getFilteredCostResults());
+}
+
+function filterCostTable() {
+  renderCostRows(getFilteredCostResults());
+}
+
+function exportCostExcel() {
+  if (!STATE.calcResults || !STATE.calcResults.length) {
+    setStatus('cost-status', 'Сначала выполните расчёт', 'error');
+    return;
+  }
+
+  loadXLSX(function() {
+    var rows = [];
+    var headers = [];
+
+    for (var i = 0; i < COST_COLUMNS.length; i++) headers.push(COST_COLUMNS[i].label);
+    rows.push(headers);
+
+    for (var j = 0; j < STATE.calcResults.length; j++) {
+      var r = STATE.calcResults[j];
+      rows.push([
+        r.name || '',
+        r.type || '',
+        r.raw,
+        r.taxDuty,
+        r.delivery,
+        r.rawFl,
+        r.deliveryFl,
+        r.taxDutyFl,
+        r.label,
+        r.totalFl,
+        r.total,
+        r.cost1C,
+        r.diff,
+        r.cost1C > 0 ? r.diffPct : ''
+      ]);
+    }
+
+    var wb = XLSX.utils.book_new();
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Себестоимость');
+    XLSX.writeFile(wb, 'cost_results.xlsx');
+  });
 }
 
 function saveResultsUI() {
