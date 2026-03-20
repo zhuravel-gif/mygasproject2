@@ -23,10 +23,20 @@ var COL = {
   TAX: 17
 };
 
-function determineType(row) {
+function getDirectFlakon_(name, flakonMap) {
+  var key = String(name || '').trim();
+  if (!key || !flakonMap) return null;
+  return Object.prototype.hasOwnProperty.call(flakonMap, key) ? flakonMap[key] : null;
+}
+
+function determineType(row, flakonMap, forcedType) {
+  if (forcedType) return forcedType;
+
+  var directFlakon = getDirectFlakon_(row[COL.NAME], flakonMap);
   var isSet = String(row[COL.IS_SET] || '').trim();
   var hasRaw = String(row[COL.RAW] || '').trim() !== '';
 
+  if (directFlakon) return 'Флакон';
   if (isSet === 'Да') return 'Наборы';
   if (!hasRaw) return 'Готовый товар';
   return 'Сырьё';
@@ -85,8 +95,11 @@ function buildFlakonMap(flakons) {
   return map;
 }
 
-function calculateOne(row, params, flakonMap) {
-  var type = determineType(row);
+function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
+  params = params || {};
+  flakonMap = flakonMap || {};
+
+  var type = determineType(row, flakonMap, forcedType);
   var name = String(row[COL.NAME] || '').trim();
   var cost1C = toNumber_(row[COL.COST_1C], 0);
   var priceVal = toNumber_(row[COL.PRICE], 0);
@@ -119,7 +132,22 @@ function calculateOne(row, params, flakonMap) {
     return result;
   }
 
-  if (type === 'Готовый товар') {
+  if (type === 'Флакон') {
+    var directFlakon = getDirectFlakon_(flakonNameOverride || name, flakonMap);
+    var directMetrics = directFlakon || calculateFlakonMetrics_({
+      supplierPrice: priceVal,
+      weight: toNumber_(row[COL.WEIGHT], 0),
+      nds: ndsRate,
+      tax: taxRate,
+      label: 0
+    }, params);
+
+    result.rawFl = toNumber_(directMetrics.rawFl, 0);
+    result.deliveryFl = toNumber_(directMetrics.deliveryFl, 0);
+    result.taxDutyFl = toNumber_(directMetrics.taxDutyFl, 0);
+    result.label = toNumber_(directMetrics.label, 0);
+    result.totalFl = toNumber_(directMetrics.totalFl, 0);
+  } else if (type === 'Готовый товар') {
     var finishedWeight = toNumber_(row[COL.WEIGHT], 0);
     result.raw = priceVal * rmb * com;
     result.delivery = log * finishedWeight * 1.15 * usd * com;
@@ -130,8 +158,8 @@ function calculateOne(row, params, flakonMap) {
     result.delivery = log * volume / 1000 * 1.15 * usd * com;
     result.taxDuty = (result.raw + result.delivery + result.raw * taxRate) * ndsRate + result.raw * taxRate;
 
-    var flakonName = String(row[COL.FLAKON] || '').trim();
-    var flakon = flakonMap[flakonName] || {
+    var flakonName = String(flakonNameOverride || row[COL.FLAKON] || '').trim();
+    var flakon = getDirectFlakon_(flakonName, flakonMap) || {
       rawFl: 0,
       deliveryFl: 0,
       taxDutyFl: 0,
@@ -216,7 +244,7 @@ function calculateManual(input) {
 
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
-  return calculateOne(row, input || {}, flakonMap);
+  return calculateOne(row, input || {}, flakonMap, input.type, input.flakonName);
 }
 
 function getVerification(index, params) {
@@ -228,8 +256,8 @@ function getVerification(index, params) {
   var row = dataObj.rows[index];
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
-  var result = calculateOne(row, params || {}, flakonMap);
-  var type = determineType(row);
+  var type = determineType(row, flakonMap);
+  var result = calculateOne(row, params || {}, flakonMap, type);
   var priceVal = toNumber_(row[COL.PRICE], 0);
   var ndsRate = toNumber_(row[COL.NDS], 0.22);
   var taxRate = toNumber_(row[COL.TAX], 0.065);
@@ -241,8 +269,8 @@ function getVerification(index, params) {
   var comFl = toNumber_(params.comFl, 1.05);
   var volume = toNumber_(row[COL.VOL], 0);
   var weight = toNumber_(row[COL.WEIGHT], 0);
-  var flakonName = String(row[COL.FLAKON] || '').trim();
-  var flakon = flakonMap[flakonName] || {
+  var flakonName = type === 'Флакон' ? String(row[COL.NAME] || '').trim() : String(row[COL.FLAKON] || '').trim();
+  var flakon = getDirectFlakon_(flakonName, flakonMap) || {
     supplierPrice: 0,
     weight: 0,
     nds: 0.22,
@@ -255,10 +283,11 @@ function getVerification(index, params) {
   };
   var cost1C = toNumber_(row[COL.COST_1C], 0);
   var steps = [];
+  var directFlakon = getDirectFlakon_(row[COL.NAME], flakonMap);
 
   steps.push({
     title: 'Определение типа',
-    formula: 'Набор = "' + String(row[COL.IS_SET] || '') + '", Сырьё = "' + String(row[COL.RAW] || '') + '"',
+    formula: 'Флакон = "' + (directFlakon ? 'Да' : 'Нет') + '", Набор = "' + String(row[COL.IS_SET] || '') + '", Сырьё = "' + String(row[COL.RAW] || '') + '"',
     result: type
   });
 
@@ -283,6 +312,37 @@ function getVerification(index, params) {
       title: 'Нал+Пош',
       formula: '(Сырьё + Доставка + Сырьё×Пошлина) × НДС + Сырьё×Пошлина',
       result: result.taxDuty.toFixed(2)
+    });
+  } else if (type === 'Флакон') {
+    steps.push({
+      title: 'Источник расчёта флакона',
+      formula: 'Позиция найдена на листе "Флаконы" по совпадению Наименование = Флакон',
+      result: flakonName || '—'
+    });
+    steps.push({
+      title: 'Цена флакона в руб.',
+      formula: 'Цена поставщика × RMB × Ком_fl = ' + toNumber_(flakon.supplierPrice, 0) + ' × ' + rmb + ' × ' + comFl,
+      result: result.rawFl.toFixed(2)
+    });
+    steps.push({
+      title: 'Доставка флакона в руб.',
+      formula: 'Лог_fl × Вес × 1.15 × USD × Ком_fl = ' + logFl + ' × ' + toNumber_(flakon.weight, 0) + ' × 1.15 × ' + usd + ' × ' + comFl,
+      result: result.deliveryFl.toFixed(2)
+    });
+    steps.push({
+      title: 'НДС+пошлина флакона',
+      formula: '(Цена флакона + Доставка флакона + Цена флакона×Пошлина_fl) × НДС_fl + Цена флакона×Пошлина_fl',
+      result: result.taxDutyFl.toFixed(2)
+    });
+    steps.push({
+      title: 'Этикетка',
+      formula: 'Из таблицы флаконов',
+      result: result.label.toFixed(2)
+    });
+    steps.push({
+      title: 'Себестоимость флакона',
+      formula: 'Цена флакона + Доставка флакона + НДС+пошлина + Этикетка',
+      result: result.totalFl.toFixed(2)
     });
   } else {
     steps.push({
@@ -354,8 +414,8 @@ function getVerification(index, params) {
       com: com,
       logFl: logFl,
       comFl: comFl,
-      ndsRate: ndsRate,
-      taxRate: taxRate
+      ndsRate: type === 'Флакон' ? toNumber_(flakon.nds, ndsRate) : ndsRate,
+      taxRate: type === 'Флакон' ? toNumber_(flakon.tax, taxRate) : taxRate
     }
   };
 }

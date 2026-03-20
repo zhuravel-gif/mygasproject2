@@ -30,7 +30,7 @@ function showTab(tabId) {
   }
   if (tabId === 'params' && !STATE.params) loadParamsUI();
   if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
-  if (tabId === 'calc') populateCalcSelects();
+  if (tabId === 'calc') ensureFlakonsState(function() { populateCalcSelects(); });
   if (tabId === 'verify') populateVerifySelect();
 }
 
@@ -55,6 +55,50 @@ function toggleFlakonGuide() {
   var guide = document.getElementById('flakon-guide');
   if (!guide) return;
   guide.classList.toggle('hidden');
+}
+
+function ensureFlakonsState(callback) {
+  if (STATE.flakons && STATE.flakons.length) {
+    if (callback) callback();
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(flakons) {
+      STATE.flakons = flakons || [];
+      if (callback) callback();
+    })
+    .withFailureHandler(function() {
+      if (callback) callback();
+    })
+    .getFlakonList();
+}
+
+function isKnownFlakonName(name) {
+  var target = String(name || '').trim();
+  if (!target || !STATE.flakons || !STATE.flakons.length) return false;
+  for (var i = 0; i < STATE.flakons.length; i++) {
+    if (String(STATE.flakons[i].name || '').trim() === target) return true;
+  }
+  return false;
+}
+
+function detectItemTypeForUI(row) {
+  var name = String(row && row[0] || '').trim();
+  var isSet = String(row && row[11] || '').trim();
+  var hasRaw = row && row[7] && String(row[7]).trim() !== '';
+
+  if (isKnownFlakonName(name)) return 'Флакон';
+  if (isSet === 'Да') return 'Наборы';
+  if (!hasRaw) return 'Готовый товар';
+  return 'Сырьё';
+}
+
+function getTypeBadgeClass(type) {
+  if (type === 'Сырьё') return 'badge-raw';
+  if (type === 'Готовый товар') return 'badge-finished';
+  if (type === 'Флакон') return 'badge-flakon';
+  return 'badge-set';
 }
 
 // ============================================================
@@ -639,6 +683,7 @@ function loadFlakonsUI() {
       renderFlakonsTable(flakons);
       var flSel = document.getElementById('calc-flakon');
       if (flSel) flSel.innerHTML = '<option value="">— Нет —</option>';
+      populateCalcSelects();
       setStatus('flakons-status', 'Загружено ' + flakons.length + ' флаконов', 'success');
     })
     .withFailureHandler(function(err) {
@@ -807,10 +852,11 @@ function filterCostTable() {
 }
 
 function renderCostStats(results) {
-  var totals = { raw: 0, finished: 0, sets: 0, totalCost: 0, total1C: 0 };
+  var totals = { raw: 0, finished: 0, flakons: 0, sets: 0, totalCost: 0, total1C: 0 };
   results.forEach(function(r) {
     if (r.type === 'Сырьё') totals.raw++;
     else if (r.type === 'Готовый товар') totals.finished++;
+    else if (r.type === 'Флакон') totals.flakons++;
     else totals.sets++;
     totals.totalCost += r.total;
     totals.total1C   += r.cost1C;
@@ -818,6 +864,7 @@ function renderCostStats(results) {
   document.getElementById('cost-stats').innerHTML =
     '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + totals.raw + '</span>' +
     '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Гот.товар: ' + totals.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#0b57d0"></span>Флаконы: ' + totals.flakons + '</span>' +
     '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + totals.sets + '</span>' +
     '<span class="stat-item">|</span>' +
     '<span class="stat-item">Расчёт: <b>' + fmt(totals.totalCost) + '</b></span>' +
@@ -1046,7 +1093,7 @@ function renderCostRows(results) {
   for (var i = 0; i < results.length; i++) {
     var r = results[i];
     var diffClass = r.diff > 0 ? 'diff-pos' : (r.diff < 0 ? 'diff-neg' : 'diff-zero');
-    var badgeClass = r.type === 'Сырьё' ? 'badge-raw' : (r.type === 'Готовый товар' ? 'badge-finished' : 'badge-set');
+    var badgeClass = getTypeBadgeClass(r.type);
     var tr = document.createElement('tr');
     tr.setAttribute('data-type', r.type);
     tr.setAttribute('data-name', getCostSearchHaystack(r));
@@ -1192,13 +1239,19 @@ function calcManual() {
   var p = getParamsFromUI();
   var nds = getNumericInputValue('calc-nds', 0.22);
   var tax = getNumericInputValue('calc-tax', 0.065);
+  var selectedIdx = document.getElementById('calc-select').value;
+  var selectedRow = selectedIdx !== '' && STATE.exportData && STATE.exportData.rows
+    ? STATE.exportData.rows[parseInt(selectedIdx, 10)]
+    : null;
+  var selectedName = selectedRow ? String(selectedRow[0] || '').trim() : '';
+  var currentFlakonName = document.getElementById('calc-flakon').value || '';
   var input = {
-    name:       'Ручной расчёт',
+    name:       selectedName || currentFlakonName || 'Ручной расчёт',
     type:       document.getElementById('calc-type').value,
     price:      parseFloat(document.getElementById('calc-price').value)  || 0,
     volume:     parseFloat(document.getElementById('calc-vol').value)    || 0,
     weight:     parseFloat(document.getElementById('calc-weight').value) || 0,
-    flakonName: document.getElementById('calc-flakon').value || '',
+    flakonName: currentFlakonName,
     cost1C:     parseFloat(document.getElementById('calc-cost1c').value) || 0,
     usd: p.usd, rmb: p.rmb, log: p.log, com: p.com, logFl: p.logFl, comFl: p.comFl,
     ndsRate: nds, taxRate: tax
@@ -1842,15 +1895,14 @@ function onCalcSelect() {
   var row = STATE.exportData.rows[parseInt(idx, 10)];
   if (!row) return;
 
-  var isSet = String(row[11] || '').trim();
-  var hasRaw = row[7] && String(row[7]).trim() !== '';
-  var type = isSet === 'Да' ? 'Наборы' : (!hasRaw ? 'Готовый товар' : 'Сырьё');
+  var type = detectItemTypeForUI(row);
+  var flakonName = type === 'Флакон' ? String(row[0] || '').trim() : String(row[8] || '').trim();
 
   document.getElementById('calc-type').value = type;
   document.getElementById('calc-price').value = parseFloat(row[15]) || 0;
   document.getElementById('calc-vol').value = parseFloat(row[4]) || 0;
   document.getElementById('calc-weight').value = parseFloat(row[12]) || 0;
-  document.getElementById('calc-flakon').value = String(row[8] || '').trim();
+  document.getElementById('calc-flakon').value = flakonName;
   document.getElementById('calc-nds').value = parseFloat(row[16]) || 0.22;
   document.getElementById('calc-tax').value = parseFloat(row[17]) || 0.065;
   document.getElementById('calc-cost1c').value = parseFloat(row[14]) || 0;
