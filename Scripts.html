@@ -1496,6 +1496,7 @@ window.addEventListener('load', function() {
 // ============================================================
 var EXPORT_SCHEMA_COLS = 18;
 var EXPORT_PRICE_COL = 15;
+var EXPORT_PRIORITY_ORDER = [0, 1, 2, 3, 13, 14, 15, 16, 17];
 var EXPORT_SLICER_EXCLUDED = {
   0: true,   // Номенклатура
   1: true,   // Артикул
@@ -1511,19 +1512,47 @@ var EXPORT_NUMERIC_COLS = {
 };
 
 STATE.exportFilters = STATE.exportFilters || {};
+STATE.exportSort = STATE.exportSort || { sourceCol: null, dir: 'asc' };
 
 function getExportColCountV3(data) {
   if (!data || !data.headers) return 0;
   return Math.min(data.headers.length, EXPORT_SCHEMA_COLS);
 }
 
-function getVisibleExportHeadersV3(data) {
-  return (data && data.headers ? data.headers : []).slice(0, getExportColCountV3(data));
+function getExportDisplayOrderV3(data) {
+  var colCount = getExportColCountV3(data);
+  var order = [];
+  var seen = {};
+
+  for (var i = 0; i < EXPORT_PRIORITY_ORDER.length; i++) {
+    var priorityCol = EXPORT_PRIORITY_ORDER[i];
+    if (priorityCol < colCount && !seen[priorityCol]) {
+      order.push(priorityCol);
+      seen[priorityCol] = true;
+    }
+  }
+
+  for (var c = 0; c < colCount; c++) {
+    if (!seen[c]) order.push(c);
+  }
+
+  return order;
 }
 
-function getVisibleExportRowV3(row, colCount) {
+function getVisibleExportHeadersV3(data) {
+  var headers = data && data.headers ? data.headers : [];
+  var order = getExportDisplayOrderV3(data);
   var out = [];
-  for (var i = 0; i < colCount; i++) out.push(row[i]);
+  for (var i = 0; i < order.length; i++) {
+    out.push(headers[order[i]]);
+  }
+  return out;
+}
+
+function getVisibleExportRowV3(row, data) {
+  var out = [];
+  var order = getExportDisplayOrderV3(data);
+  for (var i = 0; i < order.length; i++) out.push(row[order[i]]);
   return out;
 }
 
@@ -1549,15 +1578,49 @@ function getExportSearchHaystackV3(row) {
   ].join(' ').toLowerCase();
 }
 
+function getSortIndicatorV3(sourceCol) {
+  if (STATE.exportSort.sourceCol !== sourceCol) return ' ↕';
+  return STATE.exportSort.dir === 'asc' ? ' ↑' : ' ↓';
+}
+
+function toggleExportSortV3(sourceCol) {
+  if (STATE.exportSort.sourceCol === sourceCol) {
+    STATE.exportSort.dir = STATE.exportSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    STATE.exportSort.sourceCol = sourceCol;
+    STATE.exportSort.dir = 'asc';
+  }
+  renderExportTable(STATE.exportData);
+}
+
+function compareExportValuesV3(a, b, sourceCol) {
+  var av = a.row[sourceCol];
+  var bv = b.row[sourceCol];
+  var aText = normalizeExportValueV3(av);
+  var bText = normalizeExportValueV3(bv);
+  var aNum = parseNumberV2(av);
+  var bNum = parseNumberV2(bv);
+
+  if (aText === '' && bText === '') return 0;
+  if (aText === '') return 1;
+  if (bText === '') return -1;
+
+  if (EXPORT_NUMERIC_COLS[sourceCol] || sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL) {
+    if (aNum !== null && bNum !== null) return aNum - bNum;
+  }
+
+  return aText.localeCompare(bText, 'ru', { sensitivity: 'base', numeric: true });
+}
+
 function sanitizeExportFiltersV3(data) {
   var rows = data && data.rows ? data.rows : [];
-  var colCount = getExportColCountV3(data);
   var valid = {};
 
   for (var i = 0; i < rows.length; i++) {
-    var row = getVisibleExportRowV3(rows[i], colCount);
-    for (var c = 0; c < colCount; c++) {
-      if (!isFilterableExportColV3(c)) continue;
+    var row = getVisibleExportRowV3(rows[i], data);
+    var order = getExportDisplayOrderV3(data);
+    for (var c = 0; c < order.length; c++) {
+      if (!isFilterableExportColV3(order[c])) continue;
       var key = normalizeExportValueV3(row[c]);
       if (!key) continue;
       if (!valid[c]) valid[c] = {};
@@ -1578,13 +1641,14 @@ function sanitizeExportFiltersV3(data) {
 function buildExportSlicerDefsV3(data) {
   var headers = getVisibleExportHeadersV3(data);
   var rows = data && data.rows ? data.rows : [];
+  var order = getExportDisplayOrderV3(data);
   var defs = [];
 
   for (var c = 0; c < headers.length; c++) {
-    if (!isFilterableExportColV3(c)) continue;
+    if (!isFilterableExportColV3(order[c])) continue;
     var values = {};
     for (var r = 0; r < rows.length; r++) {
-      var value = normalizeExportValueV3(rows[r][c]);
+      var value = normalizeExportValueV3(rows[r][order[c]]);
       if (!value) continue;
       values[value] = true;
     }
@@ -1655,20 +1719,19 @@ function getFilteredExportEntriesV3() {
   if (!STATE.exportData || !STATE.exportData.rows) return [];
 
   var rows = STATE.exportData.rows;
-  var colCount = getExportColCountV3(STATE.exportData);
   var query = getExportSearchQueryV3();
   var entries = [];
 
   for (var i = 0; i < rows.length; i++) {
-    var row = getVisibleExportRowV3(rows[i], colCount);
-    if (query && getExportSearchHaystackV3(row).indexOf(query) < 0) continue;
+    var visibleRow = getVisibleExportRowV3(rows[i], STATE.exportData);
+    if (query && getExportSearchHaystackV3(visibleRow).indexOf(query) < 0) continue;
 
     var matches = true;
     for (var filterCol in STATE.exportFilters) {
       if (!STATE.exportFilters.hasOwnProperty(filterCol)) continue;
       var filterValue = STATE.exportFilters[filterCol];
       if (!filterValue) continue;
-      if (normalizeExportValueV3(row[parseInt(filterCol, 10)]) !== filterValue) {
+      if (normalizeExportValueV3(visibleRow[parseInt(filterCol, 10)]) !== filterValue) {
         matches = false;
         break;
       }
@@ -1677,7 +1740,15 @@ function getFilteredExportEntriesV3() {
 
     entries.push({
       index: i,
-      row: row
+      row: rows[i],
+      visibleRow: visibleRow
+    });
+  }
+
+  if (STATE.exportSort.sourceCol !== null && STATE.exportSort.sourceCol !== undefined) {
+    entries.sort(function(a, b) {
+      var result = compareExportValuesV3(a, b, STATE.exportSort.sourceCol);
+      return STATE.exportSort.dir === 'asc' ? result : -result;
     });
   }
 
@@ -1691,18 +1762,25 @@ function renderExportTable(data) {
   sanitizeExportFiltersV3(data);
 
   var headers = getVisibleExportHeadersV3(data);
+  var order = getExportDisplayOrderV3(data);
   var thead = document.getElementById('export-thead');
   var tbody = document.getElementById('export-tbody');
   thead.innerHTML = '';
   tbody.innerHTML = '';
 
   for (var h = 0; h < headers.length; h++) {
+    var sourceCol = order[h];
     var th = document.createElement('th');
     var full = String(headers[h] || '');
-    th.textContent = full.length > 30 ? full.substring(0, 28) + '...' : full;
+    th.className = 'sortable-col';
+    th.textContent = (full.length > 30 ? full.substring(0, 28) + '...' : full) + getSortIndicatorV3(sourceCol);
     th.title = full;
-    if (h === EXPORT_PRICE_COL) th.style.background = '#fff4e5';
-    if (h === EXPORT_NDS_COL || h === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
+    th.setAttribute('data-source-col', sourceCol);
+    th.addEventListener('click', function() {
+      toggleExportSortV3(parseInt(this.getAttribute('data-source-col'), 10));
+    });
+    if (sourceCol === EXPORT_PRICE_COL) th.style.background = '#fff4e5';
+    if (sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
     thead.appendChild(th);
   }
 
@@ -1717,25 +1795,28 @@ function renderExportRows(entries) {
   for (var i = 0; i < entries.length; i++) {
     var entry = entries[i];
     var row = entry.row;
+    var visibleRow = entry.visibleRow;
+    var order = getExportDisplayOrderV3(STATE.exportData);
     var originalIndex = entry.index;
     var tr = document.createElement('tr');
-    tr.setAttribute('data-name', getExportSearchHaystackV3(row));
+    tr.setAttribute('data-name', getExportSearchHaystackV3(visibleRow));
 
-    for (var j = 0; j < row.length; j++) {
+    for (var j = 0; j < visibleRow.length; j++) {
+      var sourceCol = order[j];
       var td = document.createElement('td');
 
-      if (j === EXPORT_PRICE_COL || j === EXPORT_NDS_COL || j === EXPORT_TAX_COL) {
-        var field = j === EXPORT_PRICE_COL ? 'supplierPrice' : (j === EXPORT_NDS_COL ? 'nds' : 'tax');
+      if (sourceCol === EXPORT_PRICE_COL || sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL) {
+        var field = sourceCol === EXPORT_PRICE_COL ? 'supplierPrice' : (sourceCol === EXPORT_NDS_COL ? 'nds' : 'tax');
         var inp = document.createElement('input');
-        var inputValue = normalizeExportValueV3(row[j]);
+        var inputValue = normalizeExportValueV3(row[sourceCol]);
         inp.type = 'number';
         inp.className = 'rate-input nds-tax-input';
-        inp.step = j === EXPORT_PRICE_COL ? '0.01' : '0.001';
-        if (inputValue === '') inputValue = j === EXPORT_PRICE_COL ? '0' : (j === EXPORT_NDS_COL ? '0.22' : '0.065');
+        inp.step = sourceCol === EXPORT_PRICE_COL ? '0.01' : '0.001';
+        if (inputValue === '') inputValue = sourceCol === EXPORT_PRICE_COL ? '0' : (sourceCol === EXPORT_NDS_COL ? '0.22' : '0.065');
         inp.value = inputValue;
         inp.setAttribute('data-row', originalIndex);
         inp.setAttribute('data-field', field);
-        td.style.background = j === EXPORT_PRICE_COL ? '#fffaf0' : '#f1f8e9';
+        td.style.background = sourceCol === EXPORT_PRICE_COL ? '#fffaf0' : '#f1f8e9';
         td.style.padding = '2px 6px';
         (function(el, rowIndex, fieldName, colIndex) {
           el.addEventListener('input', function() {
@@ -1747,11 +1828,11 @@ function renderExportRows(entries) {
           el.addEventListener('change', function() {
             onNdsTaxChange(rowIndex, fieldName, this.value);
           });
-        })(inp, originalIndex, field, j);
+        })(inp, originalIndex, field, sourceCol);
         td.appendChild(inp);
       } else {
-        var val = row[j];
-        if (EXPORT_NUMERIC_COLS[j]) {
+        var val = row[sourceCol];
+        if (EXPORT_NUMERIC_COLS[sourceCol]) {
           var parsed = parseNumberV2(val);
           if (parsed !== null) {
             td.className = 'num';
@@ -1815,7 +1896,7 @@ function exportCSV() {
   rows.push(headers.join(';'));
 
   for (var i = 0; i < STATE.exportData.rows.length; i++) {
-    var row = getVisibleExportRowV3(STATE.exportData.rows[i], headers.length);
+    var row = getVisibleExportRowV3(STATE.exportData.rows[i], STATE.exportData);
     rows.push(row.map(function(v) {
       var value = v === null || v === undefined ? '' : String(v);
       return '"' + value.replace(/"/g, '""') + '"';
