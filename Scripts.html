@@ -45,6 +45,12 @@ function setStatus(id, msg, type) {
   if (el) { el.textContent = msg; el.className = 'status ' + (type || ''); }
 }
 
+function toggleImportGuide() {
+  var guide = document.getElementById('import-guide');
+  if (!guide) return;
+  guide.classList.toggle('hidden');
+}
+
 // ============================================================
 // XLSX LAZY LOAD
 // ============================================================
@@ -1489,6 +1495,7 @@ window.addEventListener('load', function() {
 // IMPORT TAB OVERRIDES (V3)
 // ============================================================
 var EXPORT_SCHEMA_COLS = 18;
+var EXPORT_PRICE_COL = 15;
 var EXPORT_SLICER_EXCLUDED = {
   0: true,   // Номенклатура
   1: true,   // Артикул
@@ -1694,6 +1701,7 @@ function renderExportTable(data) {
     var full = String(headers[h] || '');
     th.textContent = full.length > 30 ? full.substring(0, 28) + '...' : full;
     th.title = full;
+    if (h === EXPORT_PRICE_COL) th.style.background = '#fff4e5';
     if (h === EXPORT_NDS_COL || h === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
     thead.appendChild(th);
   }
@@ -1716,18 +1724,18 @@ function renderExportRows(entries) {
     for (var j = 0; j < row.length; j++) {
       var td = document.createElement('td');
 
-      if (j === EXPORT_NDS_COL || j === EXPORT_TAX_COL) {
-        var field = j === EXPORT_NDS_COL ? 'nds' : 'tax';
+      if (j === EXPORT_PRICE_COL || j === EXPORT_NDS_COL || j === EXPORT_TAX_COL) {
+        var field = j === EXPORT_PRICE_COL ? 'supplierPrice' : (j === EXPORT_NDS_COL ? 'nds' : 'tax');
         var inp = document.createElement('input');
         var inputValue = normalizeExportValueV3(row[j]);
         inp.type = 'number';
         inp.className = 'rate-input nds-tax-input';
-        inp.step = '0.001';
-        if (inputValue === '') inputValue = j === EXPORT_NDS_COL ? '0.22' : '0.065';
+        inp.step = j === EXPORT_PRICE_COL ? '0.01' : '0.001';
+        if (inputValue === '') inputValue = j === EXPORT_PRICE_COL ? '0' : (j === EXPORT_NDS_COL ? '0.22' : '0.065');
         inp.value = inputValue;
         inp.setAttribute('data-row', originalIndex);
         inp.setAttribute('data-field', field);
-        td.style.background = '#f1f8e9';
+        td.style.background = j === EXPORT_PRICE_COL ? '#fffaf0' : '#f1f8e9';
         td.style.padding = '2px 6px';
         (function(el, rowIndex, fieldName, colIndex) {
           el.addEventListener('input', function() {
@@ -1829,6 +1837,7 @@ function flushNdsTaxUpdates() {
     if (!NDS_TAX_PENDING.hasOwnProperty(rowIdx)) continue;
     var item = NDS_TAX_PENDING[rowIdx];
     var update = { row: parseInt(rowIdx, 10) };
+    if (item.supplierPrice !== undefined) update.supplierPrice = item.supplierPrice;
     if (item.nds !== undefined) update.nds = item.nds;
     if (item.tax !== undefined) update.tax = item.tax;
     updates.push(update);
@@ -1841,11 +1850,11 @@ function flushNdsTaxUpdates() {
     .withSuccessHandler(function() {
       var inputs = document.querySelectorAll('.nds-tax-input.dirty');
       for (var i = 0; i < inputs.length; i++) inputs[i].classList.remove('dirty');
-      setStatus('export-status', '✓ НДС/Пошлина сохранены (' + updates.length + ' строк)', 'success');
+      setStatus('export-status', '✓ Ручные правки таблицы сохранены (' + updates.length + ' строк)', 'success');
     })
     .withFailureHandler(function(err) {
-      setStatus('export-status', 'Ошибка сохранения НДС/Пошлины: ' + err.message, 'error');
+      setStatus('export-status', 'Ошибка сохранения ручных правок: ' + err.message, 'error');
     })
-    .updateNdsTax(updates);
+    .updateImportRows(updates);
 }
 </script>

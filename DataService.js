@@ -110,7 +110,7 @@ function importSupplierPriceData(payload) {
   return importMappedValues_(payload, CFG.PRICE_COL, 'Цена поставщика', 'supplier');
 }
 
-function updateNdsTax(updates) {
+function updateImportRows(updates) {
   if (!updates || updates.length === 0) {
     return { success: false, message: 'Нет изменений для сохранения.' };
   }
@@ -126,6 +126,10 @@ function updateNdsTax(updates) {
   for (var i = 0; i < updates.length; i++) {
     var item = updates[i];
     var rowNumber = Number(item.row) + 2;
+
+    if (item.supplierPrice !== undefined) {
+      sheet.getRange(rowNumber, CFG.PRICE_COL + 1).setValue(coerceNumber_(item.supplierPrice));
+    }
     if (item.nds !== undefined) {
       sheet.getRange(rowNumber, CFG.NDS_COL + 1).setValue(normalizeRateValue_(item.nds, 0.22));
     }
@@ -138,6 +142,10 @@ function updateNdsTax(updates) {
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
   return { success: true, count: updates.length };
+}
+
+function updateNdsTax(updates) {
+  return updateImportRows(updates);
 }
 
 function updateAllNdsTax(nds, tax) {
