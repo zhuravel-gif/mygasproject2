@@ -97,7 +97,7 @@
 
 <main class="container">
   <div id="tab-params" class="tab-content active">
-    <div class="card">
+    <div class="card section-card params-card">
       <h2>Параметры расчёта</h2>
       <p class="hint">Сначала заполните параметры расчёта и дефолтные ставки для импорта и флаконов. Эти значения используются как исходные настройки на связанных вкладках.</p>
 
@@ -183,7 +183,7 @@
   </div>
 
   <div id="tab-export" class="tab-content">
-    <div class="card">
+    <div class="card section-card import-card">
       <div class="title-row">
         <h2>Импорт в 1cData</h2>
         <button class="btn btn-outline btn-compact" onclick="toggleImportGuide()">Инструкция</button>
@@ -212,7 +212,7 @@
       <div id="export-stats" class="stats-bar"></div>
     </div>
 
-    <div class="card">
+    <div class="card section-card table-card import-table-card">
       <input
         id="export-search"
         type="text"
@@ -231,7 +231,7 @@
   </div>
 
   <div id="tab-flakons" class="tab-content">
-    <div class="card">
+    <div class="card section-card flakon-card">
       <div class="section-head">
         <h2>Себестоимость флаконов и этикетки</h2>
         <button class="btn btn-secondary btn-sm" onclick="toggleFlakonGuide()">Инструкция</button>
@@ -257,7 +257,7 @@
       <div id="flakons-status" class="status"></div>
     </div>
 
-    <div class="card">
+    <div class="card section-card table-card flakon-table-card">
       <div class="table-wrap">
         <table class="data-table editable">
           <thead>
@@ -282,7 +282,7 @@
   </div>
 
   <div id="tab-cost" class="tab-content">
-    <div class="card">
+    <div class="card section-card cost-card">
       <h2>Себестоимость позиций</h2>
       <div class="actions">
         <button class="btn btn-primary" onclick="runCalculation()">Рассчитать</button>
@@ -293,7 +293,7 @@
       <div id="cost-stats" class="stats-bar"></div>
     </div>
 
-    <div class="card">
+    <div class="card section-card table-card cost-table-card">
       <div class="filter-row">
         <input id="cost-search" type="text" class="search-input" placeholder="Поиск..." oninput="filterCostTable()">
         <select id="cost-type-filter" onchange="filterCostTable()">
@@ -316,7 +316,7 @@
   </div>
 
   <div id="tab-calc" class="tab-content">
-    <div class="card">
+    <div class="card section-card calc-card">
       <h2>Ручной калькулятор</h2>
       <p class="hint">Можно выбрать существующую позицию или задать значения вручную.</p>
 
@@ -433,7 +433,7 @@
   </div>
 
   <div id="tab-verify" class="tab-content">
-    <div class="card">
+    <div class="card section-card verify-card">
       <h2>Проверка расчёта</h2>
       <p class="hint">Выберите позицию для детального просмотра формул и подстановок.</p>
 
@@ -445,7 +445,7 @@
       </div>
     </div>
 
-    <div id="verify-output" class="card">
+    <div id="verify-output" class="card section-card verify-output-card">
       <p class="hint">Выберите позицию выше.</p>
     </div>
   </div>
