@@ -252,6 +252,7 @@
       <h2>Себестоимость позиций</h2>
       <div class="actions">
         <button class="btn btn-primary" onclick="runCalculation()">Рассчитать</button>
+        <button class="btn btn-outline" onclick="exportCostExcel()">Выгрузить в Excel</button>
         <button class="btn btn-outline" onclick="saveResultsUI()">Записать результаты на лист</button>
       </div>
       <div id="cost-status" class="status"></div>
@@ -268,27 +269,11 @@
           <option value="Наборы">Наборы</option>
         </select>
       </div>
+      <div id="cost-slicers" class="export-slicers"></div>
 
       <div class="table-wrap">
         <table class="data-table">
-          <thead>
-            <tr>
-              <th>Номенклатура</th>
-              <th>Тип</th>
-              <th>Сырьё</th>
-              <th>Нал+Пош</th>
-              <th>Доставка</th>
-              <th>Цена фл.</th>
-              <th>Дост. фл.</th>
-              <th>НДС+пошл. фл.</th>
-              <th>Этикетка</th>
-              <th>Себес. фл.</th>
-              <th class="col-total">ИТОГО</th>
-              <th>Себес 1С</th>
-              <th>Разница</th>
-              <th>%</th>
-            </tr>
-          </thead>
+          <thead><tr id="cost-thead"></tr></thead>
           <tbody id="cost-tbody"></tbody>
         </table>
       </div>
