@@ -98,8 +98,20 @@
 <main class="container">
   <div id="tab-export" class="tab-content active">
     <div class="card">
-      <h2>Импорт в 1cData</h2>
+      <div class="title-row">
+        <h2>Импорт в 1cData</h2>
+        <button class="btn btn-outline btn-compact" onclick="toggleImportGuide()">Инструкция</button>
+      </div>
       <p class="hint">Сначала загрузите базовую номенклатуру из 1С, затем подтяните текущую себестоимость и цену поставщика в уже созданную таблицу.</p>
+      <div id="import-guide" class="guide-card hidden">
+        <ol class="guide-list">
+          <li>Нажмите `Импорт из 1С номенклатуры`, выберите файл, сопоставьте колонки и выполните базовую загрузку.</li>
+          <li>Проверьте, что табличная часть заполнилась и при необходимости откорректируйте `НДС`, `Пошлина` и `Цена поставщика` вручную.</li>
+          <li>Нажмите `Импорт себестоимости текущей`, выберите файл и выполните обновление по номенклатуре, а если совпадения нет, то по артикулу.</li>
+          <li>Нажмите `Импорт цены поставщика`, выберите файл и выполните обновление цен. Эта загрузка каждый раз перезаписывает колонку `Цена поставщика`.</li>
+          <li>Используйте поиск и слайсеры над таблицей для проверки данных, затем сохраните ручные правки кнопкой `Сохранить ручные правки таблицы`.</li>
+        </ol>
+      </div>
 
       <div class="actions">
         <button class="btn btn-primary" onclick="startImport('nomenclature')">Импорт из 1С номенклатуры</button>
@@ -119,7 +131,7 @@
           <input id="bulk-tax" type="number" step="0.001" value="0.065">
         </div>
         <button class="btn btn-secondary" onclick="applyRatesToAllUI()">Применить ко всем</button>
-        <button class="btn btn-outline" onclick="saveRateEditsUI()">Сохранить ручные правки НДС/пошлины</button>
+        <button class="btn btn-outline" onclick="saveRateEditsUI()">Сохранить ручные правки таблицы</button>
       </div>
 
       <div id="export-status" class="status"></div>
@@ -134,6 +146,7 @@
         placeholder="Поиск по наименованию или артикулу..."
         oninput="filterExportTable()"
       >
+      <div id="export-slicers" class="export-slicers"></div>
       <div class="table-wrap">
         <table id="export-table" class="data-table">
           <thead><tr id="export-thead"></tr></thead>

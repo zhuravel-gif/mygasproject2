@@ -61,9 +61,10 @@ body.modal-open {
 }
 
 .container {
-  max-width: 1440px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 20px;
 }
 
 .card {
@@ -78,6 +79,18 @@ body.modal-open {
   font-size: 18px;
   margin-bottom: 8px;
   color: #202124;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.title-row h2 {
+  margin-bottom: 0;
 }
 
 .tab-content {
@@ -143,6 +156,12 @@ body.modal-open {
 
 .btn-outline:hover {
   background: #e8f0fe;
+}
+
+.btn-compact {
+  padding: 6px 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .btn-icon {
@@ -212,6 +231,40 @@ body.modal-open {
   border-color: #1a73e8;
 }
 
+.export-slicers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.export-slicer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.export-slicer label {
+  font-weight: 600;
+  font-size: 11px;
+  color: #5f6368;
+  line-height: 1.2;
+}
+
+.export-slicer select {
+  padding: 6px 8px;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.export-slicer select:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.18);
+}
+
 .filter-row {
   display: flex;
   gap: 8px;
@@ -230,12 +283,14 @@ body.modal-open {
 }
 
 .table-wrap {
+  width: 100%;
   overflow-x: auto;
   max-height: 70vh;
   overflow-y: auto;
 }
 
 .data-table {
+  min-width: 100%;
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -297,6 +352,25 @@ body.modal-open {
 .rate-input.dirty {
   border-color: #e8710a;
   background: #fff8ee;
+}
+
+.guide-card {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #d2e3fc;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.guide-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+#tab-export .card {
+  width: 100%;
 }
 
 .diff-pos {
@@ -613,13 +687,15 @@ body.modal-open {
 
 @media (max-width: 768px) {
   .params-grid,
-  .mapping-row {
+  .mapping-row,
+  .export-slicers {
     grid-template-columns: 1fr;
   }
 
   .rate-toolbar,
   .filter-row,
-  .modal-footer {
+  .modal-footer,
+  .title-row {
     flex-direction: column;
     align-items: stretch;
   }
