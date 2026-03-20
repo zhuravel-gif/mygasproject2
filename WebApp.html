@@ -2,6 +2,7 @@
 <html>
 <head>
   <base target="_top">
+  <?!= include('TabulatorCss') ?>
   <?!= include('Styles') ?>
 </head>
 <body>
@@ -221,11 +222,8 @@
         oninput="filterExportTable()"
       >
       <div id="export-slicers" class="export-slicers"></div>
-      <div class="table-wrap">
-        <table id="export-table" class="data-table">
-          <thead><tr id="export-thead"></tr></thead>
-          <tbody id="export-tbody"></tbody>
-        </table>
+      <div class="table-wrap tabulator-wrap">
+        <div id="export-grid" class="tabulator-host"></div>
       </div>
     </div>
   </div>
@@ -258,25 +256,8 @@
     </div>
 
     <div class="card section-card table-card flakon-table-card">
-      <div class="table-wrap">
-        <table class="data-table editable">
-          <thead>
-            <tr>
-              <th>Флакон</th>
-              <th>Объём</th>
-              <th>Вес</th>
-              <th>Цена поставщика</th>
-              <th>НДС</th>
-              <th>Пошлина</th>
-              <th>Этикетка</th>
-              <th class="calc-col-head">Цена флакона в руб.</th>
-              <th class="calc-col-head">Доставка в руб.</th>
-              <th class="calc-col-head">НДС+пошлина</th>
-              <th class="calc-col-head">Себестоимость флакона</th>
-            </tr>
-          </thead>
-          <tbody id="flakons-tbody"></tbody>
-        </table>
+      <div class="table-wrap tabulator-wrap">
+        <div id="flakons-grid" class="tabulator-host"></div>
       </div>
     </div>
   </div>
@@ -306,11 +287,8 @@
       </div>
       <div id="cost-slicers" class="export-slicers"></div>
 
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr id="cost-thead"></tr></thead>
-          <tbody id="cost-tbody"></tbody>
-        </table>
+      <div class="table-wrap tabulator-wrap">
+        <div id="cost-grid" class="tabulator-host"></div>
       </div>
     </div>
   </div>
@@ -452,6 +430,7 @@
 </main>
 
 <?!= include('SheetJsLib') ?>
+<?!= include('TabulatorLib') ?>
 <?!= include('Scripts') ?>
 
 </body>
