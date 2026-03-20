@@ -791,6 +791,8 @@ function saveFlakonDataUI() {
 // ============================================================
 var COST_COLUMNS = [
   { key: 'name', label: 'Номенклатура', numeric: false, filterable: false },
+  { key: 'flakonName', label: 'Флакон', numeric: false, filterable: false },
+  { key: 'category', label: 'Категория', numeric: false, filterable: false },
   { key: 'type', label: 'Тип', numeric: false, filterable: true },
   { key: 'raw', label: 'Сырьё', numeric: true, filterable: true },
   { key: 'taxDuty', label: 'Нал+Пош', numeric: true, filterable: true },
@@ -804,6 +806,16 @@ var COST_COLUMNS = [
   { key: 'cost1C', label: 'Себес 1С', numeric: true, filterable: true },
   { key: 'diff', label: 'Разница', numeric: true, filterable: true },
   { key: 'diffPct', label: '%', numeric: true, filterable: true }
+];
+
+var COST_SLICER_FIELDS = [
+  { key: 'type', label: 'Тип', numeric: false },
+  { key: 'category', label: 'Категория', numeric: false },
+  { key: 'group1', label: 'Товарная группа 1', numeric: false },
+  { key: 'group2', label: 'Товарная группа 2', numeric: false },
+  { key: 'group3', label: 'Товарная группа 3', numeric: false },
+  { key: 'rawName', label: 'Основное сырьё', numeric: false },
+  { key: 'flakonName', label: 'Флакон', numeric: false }
 ];
 
 STATE.costFilters = STATE.costFilters || {};
@@ -898,6 +910,8 @@ function getCostSearchQuery() {
 function getCostSearchHaystack(result) {
   return [
     String(result.name || ''),
+    String(result.flakonName || ''),
+    String(result.category || ''),
     String(result.type || '')
   ].join(' ').toLowerCase();
 }
@@ -909,8 +923,17 @@ function getCostRawValue(result, key) {
 }
 
 function getCostDisplayValue(result, key) {
-  if (key === 'name') return String(result.name || '');
-  if (key === 'type') return String(result.type || '');
+  var directTextKeys = {
+    name: true,
+    flakonName: true,
+    category: true,
+    group1: true,
+    group2: true,
+    group3: true,
+    rawName: true,
+    type: true
+  };
+  if (directTextKeys[key]) return String(result[key] || '');
   if (key === 'diffPct') return result.cost1C > 0 ? (result.diffPct * 100).toFixed(1) + '%' : '—';
   return fmt(result[key]);
 }
@@ -930,13 +953,12 @@ function sanitizeCostFilters() {
   var results = STATE.calcResults || [];
 
   for (var i = 0; i < results.length; i++) {
-    for (var j = 0; j < COST_COLUMNS.length; j++) {
-      var col = COST_COLUMNS[j];
-      if (!col.filterable) continue;
-      var value = getCostFilterValue(results[i], col.key);
+    for (var j = 0; j < COST_SLICER_FIELDS.length; j++) {
+      var slicer = COST_SLICER_FIELDS[j];
+      var value = getCostFilterValue(results[i], slicer.key);
       if (!value) continue;
-      if (!valid[col.key]) valid[col.key] = {};
-      valid[col.key][value] = true;
+      if (!valid[slicer.key]) valid[slicer.key] = {};
+      valid[slicer.key][value] = true;
     }
   }
 
@@ -972,10 +994,8 @@ function buildCostSlicerDefs() {
   var results = STATE.calcResults || [];
   var defs = [];
 
-  for (var i = 0; i < COST_COLUMNS.length; i++) {
-    var col = COST_COLUMNS[i];
-    if (!col.filterable) continue;
-
+  for (var i = 0; i < COST_SLICER_FIELDS.length; i++) {
+    var col = COST_SLICER_FIELDS[i];
     var values = {};
     for (var j = 0; j < results.length; j++) {
       var value = getCostFilterValue(results[j], col.key);
@@ -1121,8 +1141,10 @@ function renderCostRows(results) {
       var col = COST_COLUMNS[j];
       var td = document.createElement('td');
 
-      if (col.key === 'name') {
+      if (col.key === 'name' || col.key === 'flakonName' || col.key === 'category') {
         td.textContent = r.name || '';
+        if (col.key === 'flakonName') td.textContent = r.flakonName || '';
+        if (col.key === 'category') td.textContent = r.category || '';
       } else if (col.key === 'type') {
         td.innerHTML = '<span class="badge ' + badgeClass + '">' + esc(r.type) + '</span>';
       } else {
@@ -1167,22 +1189,13 @@ function exportCostExcel() {
 
     for (var j = 0; j < STATE.calcResults.length; j++) {
       var r = STATE.calcResults[j];
-      rows.push([
-        r.name || '',
-        r.type || '',
-        r.raw,
-        r.taxDuty,
-        r.delivery,
-        r.rawFl,
-        r.deliveryFl,
-        r.taxDutyFl,
-        r.label,
-        r.totalFl,
-        r.total,
-        r.cost1C,
-        r.diff,
-        r.cost1C > 0 ? r.diffPct : ''
-      ]);
+      var row = [];
+      for (var k = 0; k < COST_COLUMNS.length; k++) {
+        var key = COST_COLUMNS[k].key;
+        if (key === 'diffPct') row.push(r.cost1C > 0 ? r.diffPct : '');
+        else row.push(getCostRawValue(r, key));
+      }
+      rows.push(row);
     }
 
     var wb = XLSX.utils.book_new();

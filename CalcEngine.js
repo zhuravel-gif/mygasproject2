@@ -101,6 +101,8 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
 
   var type = determineType(row, flakonMap, forcedType);
   var name = String(row[COL.NAME] || '').trim();
+  var category = String(row[COL.CAT] || '').trim();
+  var flakonNameSource = String(row[COL.FLAKON] || '').trim();
   var cost1C = toNumber_(row[COL.COST_1C], 0);
   var priceVal = toNumber_(row[COL.PRICE], 0);
   var ndsRate = toNumber_(row[COL.NDS], 0.22);
@@ -112,6 +114,12 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
 
   var result = {
     name: name,
+    flakonName: flakonNameSource,
+    category: category,
+    group1: String(row[COL.GRP1] || '').trim(),
+    group2: String(row[COL.GRP2] || '').trim(),
+    group3: String(row[COL.GRP3] || '').trim(),
+    rawName: String(row[COL.RAW] || '').trim(),
     type: type,
     raw: 0,
     taxDuty: 0,
