@@ -232,43 +232,60 @@ function saveParams(p) {
 function getFlakonList() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var flSheet = ss.getSheetByName(CFG.FLAKONS);
+  var savedMap = {};
+  var savedList = [];
 
   if (flSheet && flSheet.getLastRow() > 1) {
     var flData = flSheet.getDataRange().getValues();
-    var result = [];
     for (var i = 1; i < flData.length; i++) {
-      result.push({
-        name: flData[i][0] || '',
+      var savedItem = {
+        name: String(flData[i][0] || '').trim(),
         volume: flData[i][1] || 0,
         price: flData[i][2] || 0,
         nds: flData[i][3] || 0,
         delivery: flData[i][4] || 0,
         label: flData[i][5] || 0
-      });
+      };
+      if (!savedItem.name) continue;
+      savedMap[savedItem.name] = savedItem;
+      savedList.push(savedItem);
     }
-    return result;
   }
 
   var dataSheet = ss.getSheetByName(CFG.DATA);
-  if (!dataSheet || dataSheet.getLastRow() < 2) return [];
+  if (!dataSheet || dataSheet.getLastRow() < 2) return savedList;
 
   var data = dataSheet.getDataRange().getValues();
-  var flakonMap = {};
+  var result = [];
+  var seen = {};
+
   for (var j = 1; j < data.length; j++) {
     var flakonName = String(data[j][8] || '').trim();
-    if (flakonName && !flakonMap[flakonName]) {
-      flakonMap[flakonName] = {
-        name: flakonName,
-        volume: data[j][4] || 0,
-        price: 0,
-        nds: 0,
-        delivery: 0,
-        label: 0
-      };
+    if (flakonName && !seen[flakonName]) {
+      seen[flakonName] = true;
+      if (savedMap[flakonName]) {
+        result.push({
+          name: flakonName,
+          volume: savedMap[flakonName].volume || 0,
+          price: savedMap[flakonName].price || 0,
+          nds: savedMap[flakonName].nds || 0,
+          delivery: savedMap[flakonName].delivery || 0,
+          label: savedMap[flakonName].label || 0
+        });
+      } else {
+        result.push({
+          name: flakonName,
+          volume: data[j][4] || 0,
+          price: 0,
+          nds: 0,
+          delivery: 0,
+          label: 0
+        });
+      }
     }
   }
 
-  return Object.keys(flakonMap).map(function(key) { return flakonMap[key]; });
+  return result;
 }
 
 function saveFlakonData(flakons) {
@@ -323,22 +340,22 @@ function saveResults(results) {
   ];
   var rows = [headers];
 
-  for (var i = 0; i < results.length; i++) {
-    var result = results[i];
+  for (var k = 0; k < results.length; k++) {
+    var resultItem = results[k];
     rows.push([
-      result.name,
-      result.type,
-      result.raw,
-      result.taxDuty,
-      result.delivery,
-      result.flakon,
-      result.flakonTax,
-      result.flakonDelivery,
-      result.label,
-      result.total,
-      result.cost1C,
-      result.diff,
-      result.diffPct
+      resultItem.name,
+      resultItem.type,
+      resultItem.raw,
+      resultItem.taxDuty,
+      resultItem.delivery,
+      resultItem.flakon,
+      resultItem.flakonTax,
+      resultItem.flakonDelivery,
+      resultItem.label,
+      resultItem.total,
+      resultItem.cost1C,
+      resultItem.diff,
+      resultItem.diffPct
     ]);
   }
 
