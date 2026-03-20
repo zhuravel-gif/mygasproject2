@@ -30,7 +30,10 @@ function showTab(tabId) {
   }
   if (tabId === 'params' && !STATE.params) loadParamsUI();
   if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
-  if (tabId === 'calc') ensureFlakonsState(function() { populateCalcSelects(); });
+  if (tabId === 'calc') ensureFlakonsState(function() {
+    populateCalcSelects();
+    syncCalcParamsFromParams(STATE.params || getParamsFromUI());
+  });
   if (tabId === 'verify') populateVerifySelect();
 }
 
@@ -627,6 +630,71 @@ function getNumericInputValue(id, fallback) {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+function getOptionalNumericInputValue(id) {
+  var el = document.getElementById(id);
+  if (!el) return '';
+  var raw = String(el.value || '').trim();
+  if (raw === '') return '';
+  var parsed = parseFloat(raw.replace(',', '.'));
+  return isNaN(parsed) ? '' : parsed;
+}
+
+function getCalcRuntimeParams() {
+  return {
+    usd: getNumericInputValue('calc-usd', 92),
+    rmb: getNumericInputValue('calc-rmb', 12.8),
+    log: getNumericInputValue('calc-log', 4.5),
+    com: getNumericInputValue('calc-com', 1.05),
+    logFl: getNumericInputValue('calc-log-fl', 4.5),
+    comFl: getNumericInputValue('calc-com-fl', 1.05)
+  };
+}
+
+function syncCalcParamsFromParams(p) {
+  if (!p) return;
+  var values = {
+    'calc-usd': p.usd,
+    'calc-rmb': p.rmb,
+    'calc-log': p.log,
+    'calc-com': p.com,
+    'calc-log-fl': p.logFl !== undefined && p.logFl !== null && p.logFl !== '' ? p.logFl : p.log,
+    'calc-com-fl': p.comFl !== undefined && p.comFl !== null && p.comFl !== '' ? p.comFl : p.com,
+    'calc-nds': p.importNds !== undefined && p.importNds !== null && p.importNds !== '' ? p.importNds : 0.22,
+    'calc-tax': p.importTax !== undefined && p.importTax !== null && p.importTax !== '' ? p.importTax : 0.065,
+    'calc-fl-nds': p.flakonNds !== undefined && p.flakonNds !== null && p.flakonNds !== '' ? p.flakonNds : 0.22,
+    'calc-fl-tax': p.flakonTax !== undefined && p.flakonTax !== null && p.flakonTax !== '' ? p.flakonTax : 0.065
+  };
+  Object.keys(values).forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = values[id];
+  });
+}
+
+function getFlakonByName(name) {
+  var target = String(name || '').trim();
+  if (!target || !STATE.flakons || !STATE.flakons.length) return null;
+  for (var i = 0; i < STATE.flakons.length; i++) {
+    if (String(STATE.flakons[i].name || '').trim() === target) return STATE.flakons[i];
+  }
+  return null;
+}
+
+function setCalcFlakonInputs(data) {
+  data = data || {};
+  var params = STATE.params || getParamsFromUI();
+  var values = {
+    'calc-fl-price': data.supplierPrice !== undefined && data.supplierPrice !== null && data.supplierPrice !== '' ? data.supplierPrice : '',
+    'calc-fl-weight': data.weight !== undefined && data.weight !== null && data.weight !== '' ? data.weight : '',
+    'calc-fl-nds': data.nds !== undefined && data.nds !== null && data.nds !== '' ? data.nds : (params.flakonNds !== undefined ? params.flakonNds : 0.22),
+    'calc-fl-tax': data.tax !== undefined && data.tax !== null && data.tax !== '' ? data.tax : (params.flakonTax !== undefined ? params.flakonTax : 0.065),
+    'calc-fl-label': data.label !== undefined && data.label !== null && data.label !== '' ? data.label : ''
+  };
+  Object.keys(values).forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = values[id];
+  });
+}
+
 function getParamsFromUI() {
   return {
     usd: getNumericInputValue('p-usd', 92),
@@ -659,6 +727,7 @@ function setParamsToUI(p) {
       tax: p.importTax !== undefined && p.importTax !== null && p.importTax !== '' ? p.importTax : 0.065
     };
   }
+  syncCalcParamsFromParams(p);
   STATE.params = p;
 }
 
@@ -1268,7 +1337,7 @@ function onCalcSelect() {
 }
 
 function calcManual() {
-  var p = getParamsFromUI();
+  var p = getCalcRuntimeParams();
   var nds = getNumericInputValue('calc-nds', 0.22);
   var tax = getNumericInputValue('calc-tax', 0.065);
   var selectedIdx = document.getElementById('calc-select').value;
@@ -1286,7 +1355,14 @@ function calcManual() {
     flakonName: currentFlakonName,
     cost1C:     parseFloat(document.getElementById('calc-cost1c').value) || 0,
     usd: p.usd, rmb: p.rmb, log: p.log, com: p.com, logFl: p.logFl, comFl: p.comFl,
-    ndsRate: nds, taxRate: tax
+    ndsRate: nds, taxRate: tax,
+    manualFlakon: {
+      supplierPrice: getOptionalNumericInputValue('calc-fl-price'),
+      weight: getOptionalNumericInputValue('calc-fl-weight'),
+      nds: getOptionalNumericInputValue('calc-fl-nds'),
+      tax: getOptionalNumericInputValue('calc-fl-tax'),
+      label: getOptionalNumericInputValue('calc-fl-label')
+    }
   };
   google.script.run
     .withSuccessHandler(function(res) { renderCalcResult(res); })
@@ -1294,26 +1370,46 @@ function calcManual() {
 }
 
 function renderCalcResult(r) {
+  var payload = r && r.result ? r : { result: r, steps: [], params: null, type: r ? r.type : '' };
+  var result = payload.result || {};
   var el = document.getElementById('calc-result');
-  var diffClass = r.diff > 0 ? 'diff-pos' : (r.diff < 0 ? 'diff-neg' : 'diff-zero');
-  el.innerHTML =
+  var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
+  var html =
     '<table>' +
-    '<tr><td>Тип</td><td><b>' + esc(r.type) + '</b></td></tr>' +
-    '<tr><td>Сырьё</td><td class="num">' + fmt(r.raw) + '</td></tr>' +
-    '<tr><td>Нал+Пош</td><td class="num">' + fmt(r.taxDuty) + '</td></tr>' +
-    '<tr><td>Доставка</td><td class="num">' + fmt(r.delivery) + '</td></tr>' +
-    '<tr><td>Цена флакона в руб.</td><td class="num">' + fmt(r.rawFl) + '</td></tr>' +
-    '<tr><td>Доставка флакона в руб.</td><td class="num">' + fmt(r.deliveryFl) + '</td></tr>' +
-    '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(r.taxDutyFl) + '</td></tr>' +
-    '<tr><td>Этикетка</td><td class="num">' + fmt(r.label) + '</td></tr>' +
-    '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(r.totalFl) + '</td></tr>' +
-    '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(r.total) + ' ₽</td></tr>' +
-    (r.cost1C > 0
-      ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(r.cost1C) + '</td></tr>' +
+    '<tr><td>Тип</td><td><b>' + esc(result.type || payload.type || '') + '</b></td></tr>' +
+    '<tr><td>Сырьё</td><td class="num">' + fmt(result.raw) + '</td></tr>' +
+    '<tr><td>Нал+Пош</td><td class="num">' + fmt(result.taxDuty) + '</td></tr>' +
+    '<tr><td>Доставка</td><td class="num">' + fmt(result.delivery) + '</td></tr>' +
+    '<tr><td>Цена флакона в руб.</td><td class="num">' + fmt(result.rawFl) + '</td></tr>' +
+    '<tr><td>Доставка флакона в руб.</td><td class="num">' + fmt(result.deliveryFl) + '</td></tr>' +
+    '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(result.taxDutyFl) + '</td></tr>' +
+    '<tr><td>Этикетка</td><td class="num">' + fmt(result.label) + '</td></tr>' +
+    '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(result.totalFl) + '</td></tr>' +
+    '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(result.total) + ' ₽</td></tr>' +
+    (result.cost1C > 0
+      ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(result.cost1C) + '</td></tr>' +
         '<tr class="diff-row"><td>Разница</td><td class="num ' + diffClass + '">' +
-        (r.diff > 0 ? '+' : '') + fmt(r.diff) + ' (' + (r.diffPct * 100).toFixed(1) + '%)</td></tr>'
+        (result.diff > 0 ? '+' : '') + fmt(result.diff) + ' (' + (result.diffPct * 100).toFixed(1) + '%)</td></tr>'
       : '') +
     '</table>';
+  if (payload.params) {
+    html += '<p style="margin:16px 0 12px"><b>Расшифровка расчёта</b> | USD=' + payload.params.usd +
+      ' | RMB=' + payload.params.rmb + ' | Лог=' + payload.params.log + ' | Ком=' + payload.params.com +
+      ' | Лог_fl=' + payload.params.logFl + ' | Ком_fl=' + payload.params.comFl +
+      ' | НДС=' + (payload.params.ndsRate * 100).toFixed(1) + '% | Пошлина=' + (payload.params.taxRate * 100).toFixed(1) + '%</p>';
+  }
+  for (var i = 0; i < (payload.steps || []).length; i++) {
+    var step = payload.steps[i];
+    var cls = 'verify-step';
+    if (step.title === 'ИТОГО') cls += ' step-total';
+    if (step.title.indexOf('Сравнение') >= 0) cls += ' step-diff';
+    html += '<div class="' + cls + '">';
+    html += '<div class="step-title">' + (i + 1) + '. ' + esc(step.title) + '</div>';
+    if (step.formula) html += '<div class="step-formula">' + esc(step.formula) + '</div>';
+    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'ИТОГО' ? ' ₽' : '') + '</div>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
 }
 
 // ============================================================
@@ -1916,7 +2012,11 @@ function filterExportTable() {
 
 function onCalcSelect() {
   var idx = document.getElementById('calc-select').value;
-  if (idx === '' || !STATE.exportData) return;
+  if (idx === '' || !STATE.exportData) {
+    setCalcFlakonInputs();
+    calcManual();
+    return;
+  }
   var row = STATE.exportData.rows[parseInt(idx, 10)];
   if (!row) return;
 
@@ -1931,6 +2031,12 @@ function onCalcSelect() {
   document.getElementById('calc-nds').value = parseFloat(row[16]) || 0.22;
   document.getElementById('calc-tax').value = parseFloat(row[17]) || 0.065;
   document.getElementById('calc-cost1c').value = parseFloat(row[14]) || 0;
+  onCalcFlakonChange();
+}
+
+function onCalcFlakonChange() {
+  var flakon = getFlakonByName(document.getElementById('calc-flakon').value || '');
+  setCalcFlakonInputs(flakon || null);
   calcManual();
 }
 
