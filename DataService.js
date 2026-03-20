@@ -255,6 +255,7 @@ function getFlakonList() {
 
   var data = dataSheet.getDataRange().getValues();
   var flakonMap = {};
+
   for (var j = 1; j < data.length; j++) {
     var flakonName = String(data[j][8] || '').trim();
     if (!flakonName || flakonMap[flakonName]) continue;
@@ -338,23 +339,23 @@ function saveResults(results) {
   ];
   var rows = [headers];
 
-  for (var i = 0; i < results.length; i++) {
-    var result = results[i];
+  for (var k = 0; k < results.length; k++) {
+    var resultItem = results[k];
     rows.push([
-      result.name,
-      result.type,
-      result.raw,
-      result.taxDuty,
-      result.delivery,
-      result.rawFl,
-      result.deliveryFl,
-      result.taxDutyFl,
-      result.label,
-      result.totalFl,
-      result.total,
-      result.cost1C,
-      result.diff,
-      result.diffPct
+      resultItem.name,
+      resultItem.type,
+      resultItem.raw,
+      resultItem.taxDuty,
+      resultItem.delivery,
+      resultItem.rawFl,
+      resultItem.deliveryFl,
+      resultItem.taxDutyFl,
+      resultItem.label,
+      resultItem.totalFl,
+      resultItem.total,
+      resultItem.cost1C,
+      resultItem.diff,
+      resultItem.diffPct
     ]);
   }
 
