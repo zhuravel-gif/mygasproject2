@@ -93,6 +93,18 @@ body.modal-open {
   margin-bottom: 0;
 }
 
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.section-head h2 {
+  margin-bottom: 0;
+}
+
 .tab-content {
   display: none;
 }
@@ -128,6 +140,11 @@ body.modal-open {
   border: none;
   font-weight: 500;
   transition: 0.2s;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .btn-primary {
@@ -317,10 +334,26 @@ body.modal-open {
   background: #eef3fd;
 }
 
+.data-table th.calc-col-head {
+  background: #eef7ed;
+  color: #245b2a;
+}
+
 .data-table td {
   padding: 6px 10px;
   border-bottom: 1px solid #f0f0f0;
   vertical-align: middle;
+}
+
+.readonly-cell {
+  background: #f8f9fa;
+  color: #445066;
+}
+
+.calc-col-cell {
+  background: #f3fbf2;
+  color: #245b2a;
+  font-weight: 600;
 }
 
 .data-table tr:hover {

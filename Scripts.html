@@ -51,6 +51,12 @@ function toggleImportGuide() {
   guide.classList.toggle('hidden');
 }
 
+function toggleFlakonGuide() {
+  var guide = document.getElementById('flakon-guide');
+  if (!guide) return;
+  guide.classList.toggle('hidden');
+}
+
 // ============================================================
 // XLSX LAZY LOAD
 // ============================================================
@@ -566,12 +572,23 @@ function exportCSV() {
 // ============================================================
 // TAB 2: ПАРАМЕТРЫ
 // ============================================================
+function getNumericInputValue(id, fallback) {
+  var el = document.getElementById(id);
+  if (!el) return fallback;
+  var raw = String(el.value || '').trim();
+  if (raw === '') return fallback;
+  var parsed = parseFloat(raw.replace(',', '.'));
+  return isNaN(parsed) ? fallback : parsed;
+}
+
 function getParamsFromUI() {
   return {
-    usd: parseFloat(document.getElementById('p-usd').value) || 92,
-    rmb: parseFloat(document.getElementById('p-rmb').value) || 12.8,
-    log: parseFloat(document.getElementById('p-log').value) || 4.5,
-    com: parseFloat(document.getElementById('p-com').value) || 1.05
+    usd: getNumericInputValue('p-usd', 92),
+    rmb: getNumericInputValue('p-rmb', 12.8),
+    log: getNumericInputValue('p-log', 4.5),
+    com: getNumericInputValue('p-com', 1.05),
+    logFl: getNumericInputValue('p-log-fl', 4.5),
+    comFl: getNumericInputValue('p-com-fl', 1.05)
   };
 }
 
@@ -580,6 +597,8 @@ function setParamsToUI(p) {
   document.getElementById('p-rmb').value = p.rmb;
   document.getElementById('p-log').value = p.log;
   document.getElementById('p-com').value = p.com;
+  document.getElementById('p-log-fl').value = p.logFl !== undefined && p.logFl !== null && p.logFl !== '' ? p.logFl : (p.log !== undefined && p.log !== null && p.log !== '' ? p.log : 4.5);
+  document.getElementById('p-com-fl').value = p.comFl !== undefined && p.comFl !== null && p.comFl !== '' ? p.comFl : (p.com !== undefined && p.com !== null && p.com !== '' ? p.com : 1.05);
   STATE.params = p;
 }
 
@@ -618,6 +637,8 @@ function loadFlakonsUI() {
       hideLoading();
       STATE.flakons = flakons;
       renderFlakonsTable(flakons);
+      var flSel = document.getElementById('calc-flakon');
+      if (flSel) flSel.innerHTML = '<option value="">— Нет —</option>';
       setStatus('flakons-status', 'Загружено ' + flakons.length + ' флаконов', 'success');
     })
     .withFailureHandler(function(err) {
@@ -636,10 +657,15 @@ function renderFlakonsTable(flakons) {
     tr.innerHTML =
       '<td>' + esc(f.name) + '</td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="volume" step="1" value="' + (f.volume||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="price" step="0.01" value="' + (f.price||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="nds" step="0.01" value="' + (f.nds||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="delivery" step="0.01" value="' + (f.delivery||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label||0) + '"></td>';
+      '<td><input type="number" data-idx="' + i + '" data-field="weight" step="0.001" value="' + (f.weight||0) + '"></td>' +
+      '<td class="num readonly-cell">' + fmt(f.supplierPrice) + '</td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="nds" step="0.001" value="' + (f.nds||0) + '"></td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="tax" step="0.001" value="' + (f.tax||0) + '"></td>' +
+      '<td class="num calc-col-cell">' + fmt(f.rawFl) + '</td>' +
+      '<td class="num calc-col-cell">' + fmt(f.deliveryFl) + '</td>' +
+      '<td class="num calc-col-cell">' + fmt(f.taxDutyFl) + '</td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label||0) + '"></td>' +
+      '<td class="num calc-col-cell"><b>' + fmt(f.totalFl) + '</b></td>';
     tbody.appendChild(tr);
   }
 }
@@ -652,9 +678,10 @@ function collectFlakonData() {
     flakons.push({
       name:     STATE.flakons[i].name,
       volume:   parseFloat(inputs[0].value) || 0,
-      price:    parseFloat(inputs[1].value) || 0,
+      weight:   parseFloat(inputs[1].value) || 0,
+      supplierPrice: parseFloat(STATE.flakons[i].supplierPrice) || 0,
       nds:      parseFloat(inputs[2].value) || 0,
-      delivery: parseFloat(inputs[3].value) || 0,
+      tax:      parseFloat(inputs[3].value) || 0,
       label:    parseFloat(inputs[4].value) || 0
     });
   }
@@ -667,7 +694,8 @@ function saveFlakonDataUI() {
   google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
-      STATE.flakons = data;
+      STATE.flakons = res.flakons || data;
+      renderFlakonsTable(STATE.flakons);
       setStatus('flakons-status', 'Сохранено ' + res.count + ' флаконов', 'success');
     })
     .withFailureHandler(function(err) {
@@ -717,10 +745,11 @@ function renderCostTable(results) {
       '<td class="num">' + fmt(r.raw) + '</td>' +
       '<td class="num">' + fmt(r.taxDuty) + '</td>' +
       '<td class="num">' + fmt(r.delivery) + '</td>' +
-      '<td class="num">' + fmt(r.flakon) + '</td>' +
-      '<td class="num">' + fmt(r.flakonTax) + '</td>' +
-      '<td class="num">' + fmt(r.flakonDelivery) + '</td>' +
+      '<td class="num">' + fmt(r.rawFl) + '</td>' +
+      '<td class="num">' + fmt(r.deliveryFl) + '</td>' +
+      '<td class="num">' + fmt(r.taxDutyFl) + '</td>' +
       '<td class="num">' + fmt(r.label) + '</td>' +
+      '<td class="num">' + fmt(r.totalFl) + '</td>' +
       '<td class="num col-total"><b>' + fmt(r.total) + '</b></td>' +
       '<td class="num">' + fmt(r.cost1C) + '</td>' +
       '<td class="num ' + diffClass + '">' + (r.diff > 0 ? '+' : '') + fmt(r.diff) + '</td>' +
@@ -822,8 +851,8 @@ function onCalcSelect() {
 
 function calcManual() {
   var p = getParamsFromUI();
-  var nds = parseFloat(document.getElementById('calc-nds').value) || 0.22;
-  var tax = parseFloat(document.getElementById('calc-tax').value) || 0.065;
+  var nds = getNumericInputValue('calc-nds', 0.22);
+  var tax = getNumericInputValue('calc-tax', 0.065);
   var input = {
     name:       'Ручной расчёт',
     type:       document.getElementById('calc-type').value,
@@ -832,7 +861,7 @@ function calcManual() {
     weight:     parseFloat(document.getElementById('calc-weight').value) || 0,
     flakonName: document.getElementById('calc-flakon').value || '',
     cost1C:     parseFloat(document.getElementById('calc-cost1c').value) || 0,
-    usd: p.usd, rmb: p.rmb, log: p.log, com: p.com,
+    usd: p.usd, rmb: p.rmb, log: p.log, com: p.com, logFl: p.logFl, comFl: p.comFl,
     ndsRate: nds, taxRate: tax
   };
   google.script.run
@@ -849,10 +878,11 @@ function renderCalcResult(r) {
     '<tr><td>Сырьё</td><td class="num">' + fmt(r.raw) + '</td></tr>' +
     '<tr><td>Нал+Пош</td><td class="num">' + fmt(r.taxDuty) + '</td></tr>' +
     '<tr><td>Доставка</td><td class="num">' + fmt(r.delivery) + '</td></tr>' +
-    '<tr><td>Флакон</td><td class="num">' + fmt(r.flakon) + '</td></tr>' +
-    '<tr><td>НДС флакона</td><td class="num">' + fmt(r.flakonTax) + '</td></tr>' +
-    '<tr><td>Доставка флакона</td><td class="num">' + fmt(r.flakonDelivery) + '</td></tr>' +
+    '<tr><td>Цена флакона в руб.</td><td class="num">' + fmt(r.rawFl) + '</td></tr>' +
+    '<tr><td>Доставка флакона в руб.</td><td class="num">' + fmt(r.deliveryFl) + '</td></tr>' +
+    '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(r.taxDutyFl) + '</td></tr>' +
     '<tr><td>Этикетка</td><td class="num">' + fmt(r.label) + '</td></tr>' +
+    '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(r.totalFl) + '</td></tr>' +
     '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(r.total) + ' ₽</td></tr>' +
     (r.cost1C > 0
       ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(r.cost1C) + '</td></tr>' +
@@ -902,6 +932,7 @@ function renderVerification(data) {
   var html = '<h3>' + esc(data.name) + '</h3>';
   html += '<p style="margin-bottom:16px">Тип: <b>' + esc(data.type) + '</b> | USD=' + data.params.usd +
           ' | RMB=' + data.params.rmb + ' | Лог=' + data.params.log + ' | Ком=' + data.params.com +
+          ' | Лог_fl=' + data.params.logFl + ' | Ком_fl=' + data.params.comFl +
           ' | НДС=' + (data.params.ndsRate*100).toFixed(1) + '% | Пошлина=' + (data.params.taxRate*100).toFixed(1) + '%</p>';
 
   for (var i = 0; i < data.steps.length; i++) {
