@@ -321,10 +321,24 @@ body.modal-open {
   padding: 6px 10px;
   border-bottom: 1px solid #f0f0f0;
   vertical-align: middle;
+  background: #fff;
 }
 
 .data-table tr:hover {
   background: #f8f9fa;
+}
+
+.data-table th.sticky-col,
+.data-table td.sticky-col {
+  position: sticky;
+}
+
+.data-table th.sticky-col {
+  box-shadow: 1px 0 0 #dadce0;
+}
+
+.data-table td.sticky-col {
+  box-shadow: 1px 0 0 #f0f0f0;
 }
 
 .data-table .num {

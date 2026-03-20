@@ -1495,6 +1495,7 @@ window.addEventListener('load', function() {
 // IMPORT TAB OVERRIDES (V3)
 // ============================================================
 var EXPORT_SCHEMA_COLS = 18;
+var EXPORT_STICKY_COLS = 4;
 var EXPORT_PRICE_COL = 15;
 var EXPORT_PRIORITY_ORDER = [0, 1, 2, 3, 13, 14, 15, 16, 17];
 var EXPORT_SLICER_EXCLUDED = {
@@ -1581,6 +1582,36 @@ function getExportSearchHaystackV3(row) {
 function getSortIndicatorV3(sourceCol) {
   if (STATE.exportSort.sourceCol !== sourceCol) return ' ↕';
   return STATE.exportSort.dir === 'asc' ? ' ↑' : ' ↓';
+}
+
+function applyExportStickyColumnsV3() {
+  var headerCells = document.querySelectorAll('#export-thead th');
+  if (!headerCells.length) return;
+
+  var stickyCount = Math.min(EXPORT_STICKY_COLS, headerCells.length);
+  var offsets = [];
+  var left = 0;
+
+  for (var i = 0; i < stickyCount; i++) {
+    offsets.push(left);
+    left += headerCells[i].offsetWidth;
+  }
+
+  for (var h = 0; h < stickyCount; h++) {
+    headerCells[h].classList.add('sticky-col');
+    headerCells[h].style.left = offsets[h] + 'px';
+    headerCells[h].style.zIndex = String(10 - h);
+  }
+
+  var rows = document.querySelectorAll('#export-tbody tr');
+  for (var r = 0; r < rows.length; r++) {
+    var cells = rows[r].children;
+    for (var c = 0; c < stickyCount && c < cells.length; c++) {
+      cells[c].classList.add('sticky-col');
+      cells[c].style.left = offsets[c] + 'px';
+      cells[c].style.zIndex = '2';
+    }
+  }
 }
 
 function toggleExportSortV3(sourceCol) {
@@ -1786,6 +1817,7 @@ function renderExportTable(data) {
 
   renderExportSlicersV3(data);
   renderExportRows(getFilteredExportEntriesV3());
+  applyExportStickyColumnsV3();
 }
 
 function renderExportRows(entries) {
@@ -1850,6 +1882,8 @@ function renderExportRows(entries) {
 
     tbody.appendChild(tr);
   }
+
+  applyExportStickyColumnsV3();
 }
 
 function filterExportTable() {
@@ -1938,4 +1972,8 @@ function flushNdsTaxUpdates() {
     })
     .updateImportRows(updates);
 }
+
+window.addEventListener('resize', function() {
+  applyExportStickyColumnsV3();
+});
 </script>
