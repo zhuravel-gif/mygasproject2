@@ -241,10 +241,11 @@ function getFlakonList() {
 
   if (flSheet && flSheet.getLastRow() > 1) {
     var flData = flSheet.getDataRange().getValues();
+    var flHeaders = flData[0] || [];
     for (var i = 1; i < flData.length; i++) {
       var savedName = String(flData[i][0] || '').trim();
       if (!savedName) continue;
-      savedMap[savedName] = normalizeStoredFlakonRow_(flData[i]);
+      savedMap[savedName] = normalizeStoredFlakonRow_(flData[i], flHeaders);
     }
   }
 
@@ -255,16 +256,25 @@ function getFlakonList() {
 
   var data = dataSheet.getDataRange().getValues();
   var flakonMap = {};
+  var productByName = {};
+
+  for (var k = 1; k < data.length; k++) {
+    var productNameKey = normalizeMatchKey_(data[k][0]);
+    if (productNameKey && !productByName.hasOwnProperty(productNameKey)) {
+      productByName[productNameKey] = data[k];
+    }
+  }
 
   for (var j = 1; j < data.length; j++) {
     var flakonName = String(data[j][8] || '').trim();
     if (!flakonName || flakonMap[flakonName]) continue;
+    var matchedRow = productByName[normalizeMatchKey_(flakonName)] || null;
 
     var imported = {
       name: flakonName,
-      volume: data[j][4] || 0,
-      weight: data[j][12] || 0,
-      supplierPrice: data[j][15] || 0,
+      volume: matchedRow ? matchedRow[4] : '',
+      weight: matchedRow ? matchedRow[12] : '',
+      supplierPrice: matchedRow ? matchedRow[15] : '',
       nds: 0.22,
       tax: 0.065,
       label: 0
@@ -275,11 +285,16 @@ function getFlakonList() {
   return recalculateFlakonList_(mapValues_(flakonMap), params);
 }
 
+function recalculateFlakonData(flakons) {
+  var normalized = recalculateFlakonList_(flakons || [], getParams());
+  return { success: true, count: normalized.length, flakons: normalized };
+}
+
 function saveFlakonData(flakons) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.FLAKONS) || ss.insertSheet(CFG.FLAKONS);
   var normalized = recalculateFlakonList_(flakons || [], getParams());
-  var headers = ['Флакон', 'Объём', 'Вес', 'Цена поставщика', 'НДС', 'Пошлина', 'Цена флакона в руб.', 'Доставка в руб.', 'НДС+пошлина', 'Этикетка', 'Себестоимость флакона'];
+  var headers = ['Флакон', 'Объём', 'Вес', 'Цена поставщика', 'НДС', 'Пошлина', 'Этикетка', 'Цена флакона в руб.', 'Доставка в руб.', 'НДС+пошлина', 'Себестоимость флакона'];
   var rows = [headers];
 
   for (var i = 0; i < normalized.length; i++) {
@@ -291,10 +306,10 @@ function saveFlakonData(flakons) {
       coerceNumber_(item.supplierPrice) || 0,
       hasValue_(coerceNumber_(item.nds)) ? coerceNumber_(item.nds) : 0.22,
       hasValue_(coerceNumber_(item.tax)) ? coerceNumber_(item.tax) : 0.065,
+      coerceNumber_(item.label) || 0,
       coerceNumber_(item.rawFl) || 0,
       coerceNumber_(item.deliveryFl) || 0,
       coerceNumber_(item.taxDutyFl) || 0,
-      coerceNumber_(item.label) || 0,
       coerceNumber_(item.totalFl) || 0
     ]);
   }
@@ -647,8 +662,9 @@ function arrayToNamedRow_(row) {
   return result;
 }
 
-function normalizeStoredFlakonRow_(row) {
+function normalizeStoredFlakonRow_(row, headers) {
   var hasNewSchema = row.length >= 11;
+  var isCurrentOrder = !headers || String(headers[6] || '').trim() === 'Этикетка';
   return {
     name: row[0] || '',
     volume: row[1] || 0,
@@ -656,7 +672,7 @@ function normalizeStoredFlakonRow_(row) {
     supplierPrice: hasNewSchema ? row[3] || 0 : 0,
     nds: hasNewSchema ? (hasValue_(row[4]) ? row[4] : 0.22) : (hasValue_(row[3]) ? row[3] : 0.22),
     tax: hasNewSchema ? (hasValue_(row[5]) ? row[5] : 0.065) : 0.065,
-    label: hasNewSchema ? row[9] || 0 : row[5] || 0
+    label: hasNewSchema ? (isCurrentOrder ? row[6] || 0 : row[9] || 0) : row[5] || 0
   };
 }
 
@@ -664,8 +680,8 @@ function mergeFlakonRows_(imported, saved) {
   if (!saved) return imported;
   return {
     name: imported.name || saved.name || '',
-    volume: hasValue_(saved.volume) ? saved.volume : imported.volume,
-    weight: hasValue_(saved.weight) ? saved.weight : imported.weight,
+    volume: hasValue_(imported.volume) ? imported.volume : saved.volume,
+    weight: hasValue_(imported.weight) ? imported.weight : saved.weight,
     supplierPrice: hasValue_(imported.supplierPrice) ? imported.supplierPrice : saved.supplierPrice,
     nds: hasValue_(saved.nds) ? saved.nds : imported.nds,
     tax: hasValue_(saved.tax) ? saved.tax : imported.tax,

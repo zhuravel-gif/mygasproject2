@@ -661,10 +661,10 @@ function renderFlakonsTable(flakons) {
       '<td class="num readonly-cell">' + fmt(f.supplierPrice) + '</td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="nds" step="0.001" value="' + (f.nds||0) + '"></td>' +
       '<td><input type="number" data-idx="' + i + '" data-field="tax" step="0.001" value="' + (f.tax||0) + '"></td>' +
+      '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label||0) + '"></td>' +
       '<td class="num calc-col-cell">' + fmt(f.rawFl) + '</td>' +
       '<td class="num calc-col-cell">' + fmt(f.deliveryFl) + '</td>' +
       '<td class="num calc-col-cell">' + fmt(f.taxDutyFl) + '</td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label||0) + '"></td>' +
       '<td class="num calc-col-cell"><b>' + fmt(f.totalFl) + '</b></td>';
     tbody.appendChild(tr);
   }
@@ -686,6 +686,23 @@ function collectFlakonData() {
     });
   }
   return flakons;
+}
+
+function recalculateFlakonsUI() {
+  var data = collectFlakonData();
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      STATE.flakons = res.flakons || data;
+      renderFlakonsTable(STATE.flakons);
+      setStatus('flakons-status', 'Пересчитано ' + res.count + ' флаконов', 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('flakons-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .recalculateFlakonData(data);
 }
 
 function saveFlakonDataUI() {
