@@ -359,6 +359,8 @@ function saveResults(results) {
 
   var headers = [
     'Номенклатура',
+    'Флакон',
+    'Категория',
     'Тип',
     'Сырьё',
     'Нал+Пош',
@@ -379,6 +381,8 @@ function saveResults(results) {
     var resultItem = results[k];
     rows.push([
       resultItem.name,
+      resultItem.flakonName || '',
+      resultItem.category || '',
       resultItem.type,
       resultItem.raw,
       resultItem.taxDuty,
@@ -403,8 +407,8 @@ function saveResults(results) {
   sheet.setFrozenRows(1);
 
   if (rows.length > 1) {
-    sheet.getRange(2, 3, rows.length - 1, 10).setNumberFormat('#,##0.00');
-    sheet.getRange(2, 14, rows.length - 1, 1).setNumberFormat('0.0%');
+    sheet.getRange(2, 5, rows.length - 1, 11).setNumberFormat('#,##0.00');
+    sheet.getRange(2, 16, rows.length - 1, 1).setNumberFormat('0.0%');
   }
 
   return { success: true, sheetName: sheetName, count: results.length };

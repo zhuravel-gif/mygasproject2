@@ -101,6 +101,8 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
 
   var type = determineType(row, flakonMap, forcedType);
   var name = String(row[COL.NAME] || '').trim();
+  var category = String(row[COL.CAT] || '').trim();
+  var flakonNameSource = String(row[COL.FLAKON] || '').trim();
   var cost1C = toNumber_(row[COL.COST_1C], 0);
   var priceVal = toNumber_(row[COL.PRICE], 0);
   var ndsRate = toNumber_(row[COL.NDS], 0.22);
@@ -112,6 +114,12 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
 
   var result = {
     name: name,
+    flakonName: flakonNameSource,
+    category: category,
+    group1: String(row[COL.GRP1] || '').trim(),
+    group2: String(row[COL.GRP2] || '').trim(),
+    group3: String(row[COL.GRP3] || '').trim(),
+    rawName: String(row[COL.RAW] || '').trim(),
     type: type,
     raw: 0,
     taxDuty: 0,
@@ -229,35 +237,36 @@ function calculateByIndex(index, params) {
   return calculateOne(dataObj.rows[index], params || {}, flakonMap);
 }
 
-function calculateManual(input) {
-  var row = new Array(COL.TAX + 1).fill('');
-  row[COL.NAME] = input.name || 'Ручной расчёт';
-  row[COL.VOL] = input.volume || 0;
-  row[COL.RAW] = input.type === 'Сырьё' ? 'manual' : '';
-  row[COL.FLAKON] = input.flakonName || '';
-  row[COL.IS_SET] = input.type === 'Наборы' ? 'Да' : 'Нет';
-  row[COL.WEIGHT] = input.weight || 0;
-  row[COL.PRICE] = input.price || 0;
-  row[COL.NDS] = input.ndsRate || 0.22;
-  row[COL.TAX] = input.taxRate || 0.065;
-  row[COL.COST_1C] = input.cost1C || 0;
-
-  var flakons = getFlakonList();
-  var flakonMap = buildFlakonMap(flakons);
-  return calculateOne(row, input || {}, flakonMap, input.type, input.flakonName);
+function hasManualFlakonInput_(manualFlakon) {
+  if (!manualFlakon) return false;
+  return manualFlakon.supplierPrice !== '' ||
+    manualFlakon.weight !== '' ||
+    manualFlakon.nds !== '' ||
+    manualFlakon.tax !== '' ||
+    manualFlakon.label !== '';
 }
 
-function getVerification(index, params) {
-  var dataObj = getData();
-  if (!dataObj.rows || index < 0 || index >= dataObj.rows.length) {
-    return { success: false, message: 'Позиция не найдена.' };
-  }
+function applyManualFlakonOverride_(flakonMap, flakonName, manualFlakon, params) {
+  if (!flakonName) return;
 
-  var row = dataObj.rows[index];
-  var flakons = getFlakonList();
-  var flakonMap = buildFlakonMap(flakons);
-  var type = determineType(row, flakonMap);
-  var result = calculateOne(row, params || {}, flakonMap, type);
+  var base = getDirectFlakon_(flakonName, flakonMap) || {};
+  flakonMap[flakonName] = {
+    name: flakonName,
+    volume: toNumber_(base.volume, 0),
+    supplierPrice: manualFlakon.supplierPrice !== '' ? toNumber_(manualFlakon.supplierPrice, 0) : toNumber_(base.supplierPrice, 0),
+    weight: manualFlakon.weight !== '' ? toNumber_(manualFlakon.weight, 0) : toNumber_(base.weight, 0),
+    nds: manualFlakon.nds !== '' ? toNumber_(manualFlakon.nds, toNumber_(params.flakonNds, 0.22)) : toNumber_(base.nds, toNumber_(params.flakonNds, 0.22)),
+    tax: manualFlakon.tax !== '' ? toNumber_(manualFlakon.tax, toNumber_(params.flakonTax, 0.065)) : toNumber_(base.tax, toNumber_(params.flakonTax, 0.065)),
+    label: manualFlakon.label !== '' ? toNumber_(manualFlakon.label, 0) : toNumber_(base.label, 0)
+  };
+}
+
+function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonNameOverride, sourceLabel) {
+  params = params || {};
+  flakonMap = flakonMap || {};
+
+  var type = determineType(row, flakonMap, forcedType);
+  var result = calculateOne(row, params, flakonMap, forcedType, flakonNameOverride);
   var priceVal = toNumber_(row[COL.PRICE], 0);
   var ndsRate = toNumber_(row[COL.NDS], 0.22);
   var taxRate = toNumber_(row[COL.TAX], 0.065);
@@ -269,12 +278,14 @@ function getVerification(index, params) {
   var comFl = toNumber_(params.comFl, 1.05);
   var volume = toNumber_(row[COL.VOL], 0);
   var weight = toNumber_(row[COL.WEIGHT], 0);
-  var flakonName = type === 'Флакон' ? String(row[COL.NAME] || '').trim() : String(row[COL.FLAKON] || '').trim();
+  var flakonName = type === 'Флакон'
+    ? String(flakonNameOverride || row[COL.NAME] || '').trim()
+    : String(flakonNameOverride || row[COL.FLAKON] || '').trim();
   var flakon = getDirectFlakon_(flakonName, flakonMap) || {
     supplierPrice: 0,
     weight: 0,
-    nds: 0.22,
-    tax: 0.065,
+    nds: toNumber_(params.flakonNds, 0.22),
+    tax: toNumber_(params.flakonTax, 0.065),
     label: 0,
     rawFl: 0,
     deliveryFl: 0,
@@ -284,6 +295,8 @@ function getVerification(index, params) {
   var cost1C = toNumber_(row[COL.COST_1C], 0);
   var steps = [];
   var directFlakon = getDirectFlakon_(row[COL.NAME], flakonMap);
+  var flSourceText = sourceLabel || 'Позиция найдена на листе "Флаконы" по совпадению Наименование = Флакон';
+  var labelSourceText = sourceLabel && sourceLabel.indexOf('руч') >= 0 ? 'Задано вручную' : 'Из таблицы флаконов';
 
   steps.push({
     title: 'Определение типа',
@@ -316,7 +329,7 @@ function getVerification(index, params) {
   } else if (type === 'Флакон') {
     steps.push({
       title: 'Источник расчёта флакона',
-      formula: 'Позиция найдена на листе "Флаконы" по совпадению Наименование = Флакон',
+      formula: flSourceText,
       result: flakonName || '—'
     });
     steps.push({
@@ -336,7 +349,7 @@ function getVerification(index, params) {
     });
     steps.push({
       title: 'Этикетка',
-      formula: 'Из таблицы флаконов',
+      formula: labelSourceText,
       result: result.label.toFixed(2)
     });
     steps.push({
@@ -377,7 +390,7 @@ function getVerification(index, params) {
     });
     steps.push({
       title: 'Этикетка',
-      formula: 'Из таблицы флаконов',
+      formula: labelSourceText,
       result: result.label.toFixed(2)
     });
     steps.push({
@@ -418,6 +431,50 @@ function getVerification(index, params) {
       taxRate: type === 'Флакон' ? toNumber_(flakon.tax, taxRate) : taxRate
     }
   };
+}
+
+function calculateManual(input) {
+  input = input || {};
+  var row = new Array(COL.TAX + 1).fill('');
+  row[COL.NAME] = input.name || 'Ручной расчёт';
+  row[COL.VOL] = input.volume || 0;
+  row[COL.RAW] = input.type === 'Сырьё' ? 'manual' : '';
+  row[COL.FLAKON] = input.flakonName || '';
+  row[COL.IS_SET] = input.type === 'Наборы' ? 'Да' : 'Нет';
+  row[COL.WEIGHT] = input.weight || 0;
+  row[COL.PRICE] = input.price || 0;
+  row[COL.NDS] = input.ndsRate || 0.22;
+  row[COL.TAX] = input.taxRate || 0.065;
+  row[COL.COST_1C] = input.cost1C || 0;
+
+  var flakons = getFlakonList();
+  var flakonMap = buildFlakonMap(flakons);
+  var manualFlakon = input.manualFlakon || {};
+  var flakonNameOverride = String(input.flakonName || '').trim();
+  if (!flakonNameOverride && (input.type === 'Флакон' || hasManualFlakonInput_(manualFlakon))) {
+    flakonNameOverride = '__manual_flakon__';
+  }
+  if (flakonNameOverride) {
+    applyManualFlakonOverride_(flakonMap, flakonNameOverride, manualFlakon, input);
+  }
+
+  var sourceLabel = flakonNameOverride === '__manual_flakon__'
+    ? 'Флакон и его параметры заданы вручную'
+    : (flakonNameOverride ? 'Использован выбранный флакон с возможностью ручной корректировки' : '');
+
+  return buildCalculationPayload_(row, input, flakonMap, input.type, flakonNameOverride, sourceLabel);
+}
+
+function getVerification(index, params) {
+  var dataObj = getData();
+  if (!dataObj.rows || index < 0 || index >= dataObj.rows.length) {
+    return { success: false, message: 'Позиция не найдена.' };
+  }
+
+  var row = dataObj.rows[index];
+  var flakons = getFlakonList();
+  var flakonMap = buildFlakonMap(flakons);
+  return buildCalculationPayload_(row, params || {}, flakonMap);
 }
 
 function toNumber_(value, fallback) {
