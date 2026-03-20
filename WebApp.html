@@ -9,8 +9,8 @@
 <nav class="navbar">
   <div class="nav-brand">Калькулятор себестоимости</div>
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showTab('export')">Импорт данных</button>
-    <button class="nav-tab" onclick="showTab('params')">Параметры</button>
+    <button class="nav-tab active" onclick="showTab('params')">Параметры</button>
+    <button class="nav-tab" onclick="showTab('export')">Импорт данных</button>
     <button class="nav-tab" onclick="showTab('flakons')">Флаконы</button>
     <button class="nav-tab" onclick="showTab('cost')">Себестоимость</button>
     <button class="nav-tab" onclick="showTab('calc')">Калькулятор</button>
@@ -96,67 +96,7 @@
 </div>
 
 <main class="container">
-  <div id="tab-export" class="tab-content active">
-    <div class="card">
-      <div class="title-row">
-        <h2>Импорт в 1cData</h2>
-        <button class="btn btn-outline btn-compact" onclick="toggleImportGuide()">Инструкция</button>
-      </div>
-      <p class="hint">Сначала загрузите базовую номенклатуру из 1С, затем подтяните текущую себестоимость и цену поставщика в уже созданную таблицу.</p>
-      <div id="import-guide" class="guide-card hidden">
-        <ol class="guide-list">
-          <li>Нажмите `Импорт из 1С номенклатуры`, выберите файл, сопоставьте колонки и выполните базовую загрузку.</li>
-          <li>Проверьте, что табличная часть заполнилась и при необходимости откорректируйте `НДС`, `Пошлина` и `Цена поставщика` вручную.</li>
-          <li>Нажмите `Импорт себестоимости текущей`, выберите файл и выполните обновление по номенклатуре, а если совпадения нет, то по артикулу.</li>
-          <li>Нажмите `Импорт цены поставщика`, выберите файл и выполните обновление цен. Эта загрузка каждый раз перезаписывает колонку `Цена поставщика`.</li>
-          <li>Используйте поиск и слайсеры над таблицей для проверки данных, затем сохраните ручные правки кнопкой `Сохранить ручные правки таблицы`.</li>
-        </ol>
-      </div>
-
-      <div class="actions">
-        <button class="btn btn-primary" onclick="startImport('nomenclature')">Импорт из 1С номенклатуры</button>
-        <button class="btn btn-secondary" onclick="startImport('cost')">Импорт себестоимости текущей</button>
-        <button class="btn btn-secondary" onclick="startImport('supplier')">Импорт цены поставщика</button>
-        <button class="btn btn-outline" onclick="loadExportData()">Обновить таблицу</button>
-        <button class="btn btn-outline" onclick="exportCSV()">Экспорт в CSV</button>
-      </div>
-
-      <div class="rate-toolbar">
-        <div class="param-group">
-          <label>НДС для всех строк</label>
-          <input id="bulk-nds" type="number" step="0.001" value="0.22">
-        </div>
-        <div class="param-group">
-          <label>Пошлина для всех строк</label>
-          <input id="bulk-tax" type="number" step="0.001" value="0.065">
-        </div>
-        <button class="btn btn-secondary" onclick="applyRatesToAllUI()">Применить ко всем</button>
-        <button class="btn btn-outline" onclick="saveRateEditsUI()">Сохранить ручные правки таблицы</button>
-      </div>
-
-      <div id="export-status" class="status"></div>
-      <div id="export-stats" class="stats-bar"></div>
-    </div>
-
-    <div class="card">
-      <input
-        id="export-search"
-        type="text"
-        class="search-input"
-        placeholder="Поиск по наименованию или артикулу..."
-        oninput="filterExportTable()"
-      >
-      <div id="export-slicers" class="export-slicers"></div>
-      <div class="table-wrap">
-        <table id="export-table" class="data-table">
-          <thead><tr id="export-thead"></tr></thead>
-          <tbody id="export-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div id="tab-params" class="tab-content">
+  <div id="tab-params" class="tab-content active">
     <div class="card">
       <h2>Параметры расчёта</h2>
       <p class="hint">Настройка валютных курсов, логистики и комиссии. НДС и пошлина теперь задаются в строках 1cData.</p>
@@ -193,6 +133,54 @@
         <button class="btn btn-secondary" onclick="loadParamsUI()">Загрузить сохранённые</button>
       </div>
       <div id="params-status" class="status"></div>
+    </div>
+  </div>
+
+  <div id="tab-export" class="tab-content">
+    <div class="card">
+      <div class="title-row">
+        <h2>Импорт в 1cData</h2>
+        <button class="btn btn-outline btn-compact" onclick="toggleImportGuide()">Инструкция</button>
+      </div>
+      <p class="hint">Сначала загрузите базовую номенклатуру из 1С, затем подтяните текущую себестоимость и цену поставщика в уже созданную таблицу.</p>
+      <div id="import-guide" class="guide-card hidden">
+        <ol class="guide-list">
+          <li>Нажмите `Импорт из 1С номенклатуры`, выберите файл, сопоставьте колонки и выполните базовую загрузку.</li>
+          <li>Проверьте, что табличная часть заполнилась и при необходимости откорректируйте `НДС`, `Пошлина` и `Цена поставщика` вручную.</li>
+          <li>Нажмите `Импорт себестоимости текущей`, выберите файл и выполните обновление по номенклатуре, а если совпадения нет, то по артикулу.</li>
+          <li>Нажмите `Импорт цены поставщика`, выберите файл и выполните обновление цен. Эта загрузка каждый раз перезаписывает колонку `Цена поставщика`.</li>
+          <li>Используйте поиск и слайсеры над таблицей для проверки данных, затем сохраните ручные правки кнопкой `Сохранить ручные правки таблицы`.</li>
+        </ol>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" onclick="startImport('nomenclature')">Импорт из 1С номенклатуры</button>
+        <button class="btn btn-secondary" onclick="startImport('cost')">Импорт себестоимости текущей</button>
+        <button class="btn btn-secondary" onclick="startImport('supplier')">Импорт цены поставщика</button>
+        <button class="btn btn-outline" onclick="loadExportData()">Обновить таблицу</button>
+        <button class="btn btn-outline" onclick="saveRateEditsUI()">Сохранить ручные правки таблицы</button>
+        <button class="btn btn-outline" onclick="exportCSV()">Экспорт в CSV</button>
+      </div>
+
+      <div id="export-status" class="status"></div>
+      <div id="export-stats" class="stats-bar"></div>
+    </div>
+
+    <div class="card">
+      <input
+        id="export-search"
+        type="text"
+        class="search-input"
+        placeholder="Поиск по наименованию или артикулу..."
+        oninput="filterExportTable()"
+      >
+      <div id="export-slicers" class="export-slicers"></div>
+      <div class="table-wrap">
+        <table id="export-table" class="data-table">
+          <thead><tr id="export-thead"></tr></thead>
+          <tbody id="export-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
