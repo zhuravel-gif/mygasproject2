@@ -75,7 +75,7 @@ function resetProjectSheets() {
 function getProjectSheetResetSpecs_() {
   return {
     basis: {
-      headers: ['USD', 'RMB', 'Логистика', 'Комиссия', 'Логистика_fl', 'Комиссия_fl'],
+      headers: ['USD', 'RMB', 'Логистика', 'Комиссия', 'Логистика_fl', 'Комиссия_fl', 'НДС_импорт', 'Пошлина_импорт', 'НДС_флаконы', 'Пошлина_флаконы'],
       hidden: false
     },
     '1cData': {
