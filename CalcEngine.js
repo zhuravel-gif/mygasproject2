@@ -112,19 +112,21 @@ function buildBundleContext_(params, flakonMap, dataRows) {
   for (var i = 0; i < bundleRows.length; i++) {
     var row = bundleRows[i];
     var bundleName = String(row.bundle || '').trim();
+    var bundleKey = normalizeMatchKey_(bundleName);
     var specName = String(row.specification || '').trim();
-    if (!bundleName || !specName) continue;
+    if (!bundleKey || !specName) continue;
 
-    if (!bundles[bundleName]) {
-      bundles[bundleName] = { specs: {}, specList: [], activeSpec: '' };
+    if (!bundles[bundleKey]) {
+      bundles[bundleKey] = { name: bundleName, specs: {}, specList: [], activeSpec: '' };
     }
-    if (!bundles[bundleName].specs[specName]) {
-      bundles[bundleName].specs[specName] = [];
-      bundles[bundleName].specList.push(specName);
+    if (!bundles[bundleKey].name) bundles[bundleKey].name = bundleName;
+    if (!bundles[bundleKey].specs[specName]) {
+      bundles[bundleKey].specs[specName] = [];
+      bundles[bundleKey].specList.push(specName);
     }
 
-    bundles[bundleName].specs[specName].push(row);
-    if (row.active) bundles[bundleName].activeSpec = specName;
+    bundles[bundleKey].specs[specName].push(row);
+    if (row.active) bundles[bundleKey].activeSpec = specName;
   }
 
   var bundleNames = Object.keys(bundles);
@@ -145,7 +147,7 @@ function buildBundleContext_(params, flakonMap, dataRows) {
 
 function getBundleDefinition_(bundleName, bundleContext) {
   if (!bundleContext || !bundleContext.bundles) return null;
-  return bundleContext.bundles[String(bundleName || '').trim()] || null;
+  return bundleContext.bundles[normalizeMatchKey_(bundleName)] || null;
 }
 
 function getBundleActiveRows_(bundleName, bundleContext) {
@@ -270,7 +272,8 @@ function buildBundleUiState_() {
 
   for (i = 0; i < (dataObj.rows || []).length; i++) {
     if (String(dataObj.rows[i][COL.IS_SET] || '').trim() === 'Да') {
-      knownSetNames[String(dataObj.rows[i][COL.NAME] || '').trim()] = true;
+      var knownSetKey = normalizeMatchKey_(dataObj.rows[i][COL.NAME]);
+      if (knownSetKey) knownSetNames[knownSetKey] = true;
     }
   }
 
@@ -321,13 +324,24 @@ function buildBundleUiState_() {
   });
 
   var bundleSummary = [];
+  var knownSetLabels = {};
+  for (i = 0; i < (dataObj.rows || []).length; i++) {
+    if (String(dataObj.rows[i][COL.IS_SET] || '').trim() === 'Да') {
+      var labelKey = normalizeMatchKey_(dataObj.rows[i][COL.NAME]);
+      if (labelKey && !knownSetLabels[labelKey]) {
+        knownSetLabels[labelKey] = String(dataObj.rows[i][COL.NAME] || '').trim();
+      }
+    }
+  }
+
   var knownSetKeys = Object.keys(knownSetNames).sort(function(a, b) {
-    return a.localeCompare(b, 'ru', { sensitivity: 'base', numeric: true });
+    return String(knownSetLabels[a] || a).localeCompare(String(knownSetLabels[b] || b), 'ru', { sensitivity: 'base', numeric: true });
   });
 
   for (i = 0; i < knownSetKeys.length; i++) {
-    var bundleName = knownSetKeys[i];
-    var bundleDef = bundleContext.bundles[bundleName] || null;
+    var bundleKey = knownSetKeys[i];
+    var bundleName = knownSetLabels[bundleKey] || bundleKey;
+    var bundleDef = bundleContext.bundles[bundleKey] || null;
     var compositionRows = 0;
     var specCount = 0;
     if (bundleDef) {
@@ -338,7 +352,7 @@ function buildBundleUiState_() {
     }
 
     bundleSummary.push({
-      bundle: bundleName,
+      bundle: bundleDef && bundleDef.name ? bundleDef.name : bundleName,
       activeSpec: bundleDef ? (bundleDef.activeSpec || '') : '',
       specs: bundleDef ? bundleDef.specList.slice() : [],
       matched: !!bundleDef,
@@ -349,14 +363,14 @@ function buildBundleUiState_() {
 
   var bundleKeys = Object.keys(bundleContext.bundles);
   for (i = 0; i < bundleKeys.length; i++) {
-    if (knownSetNames[bundleKeys[i]]) continue;
+    if (knownSetNames[normalizeMatchKey_(bundleKeys[i])]) continue;
     var extraDef = bundleContext.bundles[bundleKeys[i]];
     var extraRowsCount = 0;
     for (var extraSpecIdx = 0; extraSpecIdx < extraDef.specList.length; extraSpecIdx++) {
       extraRowsCount += (extraDef.specs[extraDef.specList[extraSpecIdx]] || []).length;
     }
     bundleSummary.push({
-      bundle: bundleKeys[i],
+      bundle: extraDef.name || bundleKeys[i],
       activeSpec: extraDef.activeSpec || '',
       specs: extraDef.specList.slice(),
       matched: true,
@@ -378,7 +392,7 @@ function buildBundleUiState_() {
     }),
     stats: {
       totalSets: Object.keys(knownSetNames).length,
-      loadedBundles: bundleSummary.filter(function(item) { return knownSetNames[item.bundle]; }).length,
+      loadedBundles: bundleSummary.filter(function(item) { return knownSetNames[normalizeMatchKey_(item.bundle)]; }).length,
       compositionRows: resolvedRows.length,
       unresolvedComponents: mapValues_(manualMap).length
     }
