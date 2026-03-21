@@ -321,15 +321,51 @@ function buildBundleUiState_() {
   });
 
   var bundleSummary = [];
-  var bundleKeys = Object.keys(bundleContext.bundles);
-  for (i = 0; i < bundleKeys.length; i++) {
-    var bundleName = bundleKeys[i];
+  var knownSetKeys = Object.keys(knownSetNames).sort(function(a, b) {
+    return a.localeCompare(b, 'ru', { sensitivity: 'base', numeric: true });
+  });
+
+  for (i = 0; i < knownSetKeys.length; i++) {
+    var bundleName = knownSetKeys[i];
+    var bundleDef = bundleContext.bundles[bundleName] || null;
+    var compositionRows = 0;
+    var specCount = 0;
+    if (bundleDef) {
+      specCount = bundleDef.specList.length;
+      for (var specIdx = 0; specIdx < bundleDef.specList.length; specIdx++) {
+        compositionRows += (bundleDef.specs[bundleDef.specList[specIdx]] || []).length;
+      }
+    }
+
     bundleSummary.push({
       bundle: bundleName,
-      activeSpec: bundleContext.bundles[bundleName].activeSpec || '',
-      specs: bundleContext.bundles[bundleName].specList.slice()
+      activeSpec: bundleDef ? (bundleDef.activeSpec || '') : '',
+      specs: bundleDef ? bundleDef.specList.slice() : [],
+      matched: !!bundleDef,
+      specCount: specCount,
+      compositionRows: compositionRows
     });
   }
+
+  var bundleKeys = Object.keys(bundleContext.bundles);
+  for (i = 0; i < bundleKeys.length; i++) {
+    if (knownSetNames[bundleKeys[i]]) continue;
+    var extraDef = bundleContext.bundles[bundleKeys[i]];
+    var extraRowsCount = 0;
+    for (var extraSpecIdx = 0; extraSpecIdx < extraDef.specList.length; extraSpecIdx++) {
+      extraRowsCount += (extraDef.specs[extraDef.specList[extraSpecIdx]] || []).length;
+    }
+    bundleSummary.push({
+      bundle: bundleKeys[i],
+      activeSpec: extraDef.activeSpec || '',
+      specs: extraDef.specList.slice(),
+      matched: true,
+      specCount: extraDef.specList.length,
+      compositionRows: extraRowsCount,
+      importedOnly: true
+    });
+  }
+
   bundleSummary.sort(function(a, b) {
     return a.bundle.localeCompare(b.bundle, 'ru', { sensitivity: 'base', numeric: true });
   });
