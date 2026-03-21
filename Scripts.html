@@ -2948,4 +2948,328 @@ function confirmImport() {
   if (cfg.endpoint === 'importSupplierPriceData') runner.importSupplierPriceData(payload);
   if (cfg.endpoint === 'importBundleCompositions') runner.importBundleCompositions(payload);
 }
+
+var BUNDLE_SPEC_COLUMNS = [
+  { key: 'bundle', label: 'Набор', numeric: false },
+  { key: 'matched', label: 'Статус', numeric: false },
+  { key: 'compositionRows', label: 'Строк состава', numeric: true },
+  { key: 'specCount', label: 'Спецификаций', numeric: true },
+  { key: 'activeSpec', label: 'Активная спецификация', numeric: false }
+];
+
+var BUNDLE_ROWS_COLUMNS = [
+  { key: 'component', label: 'Компонент', numeric: false },
+  { key: 'bundle', label: 'Набор', numeric: false },
+  { key: 'specification', label: 'Спецификация', numeric: false },
+  { key: 'quantity', label: 'Кол-во', numeric: true },
+  { key: 'active', label: 'Активная', numeric: false },
+  { key: 'cost1C', label: 'Себес 1С', numeric: true },
+  { key: 'calcCost', label: 'Себестоимость по расчёту', numeric: true },
+  { key: 'manualCost', label: 'Ручная стоимость', numeric: true },
+  { key: 'usedCost', label: 'Используемая стоимость', numeric: true },
+  { key: 'source', label: 'Источник', numeric: false }
+];
+
+STATE.bundleSpecSort = STATE.bundleSpecSort || { key: 'bundle', dir: 'asc' };
+STATE.bundleRowsSort = STATE.bundleRowsSort || { key: 'bundle', dir: 'asc' };
+
+function renderBundlesUI(data) {
+  data = data || { rows: [], bundles: [], manualItems: [], stats: null };
+  STATE.bundleData = data;
+  renderBundleSpecTable(data.bundles || []);
+  renderBundleManualRows(data.manualItems || []);
+  renderBundleRows(data.rows || []);
+  renderBundleStats(data.stats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 });
+}
+
+function getBundleSpecStatusLabel(item) {
+  if (item.importedOnly) return 'Только в составе';
+  return item.matched ? 'С комплектацией' : 'Без комплектации';
+}
+
+function getBundleSpecSortIndicator(key) {
+  if (STATE.bundleSpecSort.key !== key) return ' ↕';
+  return STATE.bundleSpecSort.dir === 'asc' ? ' ↑' : ' ↓';
+}
+
+function renderBundleSpecHeaders() {
+  var thead = document.getElementById('bundle-spec-thead');
+  if (!thead) return;
+  thead.innerHTML = '';
+
+  for (var i = 0; i < BUNDLE_SPEC_COLUMNS.length; i++) {
+    var col = BUNDLE_SPEC_COLUMNS[i];
+    var th = document.createElement('th');
+    th.className = 'sortable-col';
+    th.textContent = col.label + getBundleSpecSortIndicator(col.key);
+    th.setAttribute('data-key', col.key);
+    th.addEventListener('click', function() {
+      var key = this.getAttribute('data-key');
+      if (STATE.bundleSpecSort.key === key) {
+        STATE.bundleSpecSort.dir = STATE.bundleSpecSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        STATE.bundleSpecSort.key = key;
+        STATE.bundleSpecSort.dir = 'asc';
+      }
+      renderBundleSpecTable();
+    });
+    thead.appendChild(th);
+  }
+}
+
+function compareBundleSpecItems(a, b, key) {
+  var av;
+  var bv;
+  if (key === 'matched') {
+    av = getBundleSpecStatusLabel(a);
+    bv = getBundleSpecStatusLabel(b);
+  } else {
+    av = a[key];
+    bv = b[key];
+  }
+
+  var aNum = parseNumberV2(av);
+  var bNum = parseNumberV2(bv);
+  if (aNum !== null && bNum !== null) return aNum - bNum;
+  return String(av || '').localeCompare(String(bv || ''), 'ru', { sensitivity: 'base', numeric: true });
+}
+
+function getFilteredBundleSpecs() {
+  var items = (STATE.bundleData && STATE.bundleData.bundles) ? STATE.bundleData.bundles.slice() : [];
+  var query = String((document.getElementById('bundle-spec-search') || {}).value || '').toLowerCase().trim();
+  var matchFilter = (document.getElementById('bundle-spec-match-filter') || {}).value || '';
+
+  items = items.filter(function(item) {
+    var haystack = [item.bundle, item.activeSpec, getBundleSpecStatusLabel(item)].join(' ').toLowerCase();
+    if (query && haystack.indexOf(query) < 0) return false;
+    if (matchFilter === 'matched' && !item.matched) return false;
+    if (matchFilter === 'missing' && item.matched) return false;
+    return true;
+  });
+
+  items.sort(function(a, b) {
+    var cmp = compareBundleSpecItems(a, b, STATE.bundleSpecSort.key);
+    return STATE.bundleSpecSort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  return items;
+}
+
+function renderBundleSpecTable(bundles) {
+  if (bundles) {
+    STATE.bundleData = STATE.bundleData || {};
+    STATE.bundleData.bundles = bundles;
+  }
+
+  renderBundleSpecHeaders();
+  var tbody = document.getElementById('bundle-spec-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  var items = getFilteredBundleSpecs();
+  if (!items.length) {
+    var trEmpty = document.createElement('tr');
+    trEmpty.innerHTML = '<td colspan="5" class="muted-cell">Нет наборов для отображения.</td>';
+    tbody.appendChild(trEmpty);
+    return;
+  }
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var tr = document.createElement('tr');
+    if (!item.matched) tr.classList.add('bundle-unmatched-row');
+    tr.innerHTML =
+      '<td>' + esc(item.bundle) + '</td>' +
+      '<td>' + esc(getBundleSpecStatusLabel(item)) + '</td>' +
+      '<td class="num">' + fmt(item.compositionRows || 0) + '</td>' +
+      '<td class="num">' + fmt(item.specCount || 0) + '</td>' +
+      '<td>' + buildBundleSpecCellHtml(item) + '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function buildBundleSpecCellHtml(item) {
+  if (!item.matched || !item.specs || !item.specs.length) {
+    return '<span class="bundle-missing-chip">Нет комплектации</span>';
+  }
+
+  var html = '<select class="bundle-spec-select" data-bundle="' + esc(item.bundle) + '">';
+  for (var i = 0; i < item.specs.length; i++) {
+    var selected = item.activeSpec === item.specs[i] ? ' selected' : '';
+    html += '<option value="' + esc(item.specs[i]) + '"' + selected + '>' + esc(item.specs[i]) + '</option>';
+  }
+  html += '</select>';
+  return html;
+}
+
+function filterBundleSpecTable() {
+  renderBundleSpecTable();
+}
+
+function getBundleRowsSortIndicator(key) {
+  if (STATE.bundleRowsSort.key !== key) return ' ↕';
+  return STATE.bundleRowsSort.dir === 'asc' ? ' ↑' : ' ↓';
+}
+
+function renderBundleRowsHeaders() {
+  var thead = document.getElementById('bundle-rows-thead');
+  if (!thead) return;
+  thead.innerHTML = '';
+
+  for (var i = 0; i < BUNDLE_ROWS_COLUMNS.length; i++) {
+    var col = BUNDLE_ROWS_COLUMNS[i];
+    var th = document.createElement('th');
+    th.className = 'sortable-col' + (col.key === 'usedCost' ? ' col-total' : '');
+    th.textContent = col.label + getBundleRowsSortIndicator(col.key);
+    th.setAttribute('data-key', col.key);
+    th.addEventListener('click', function() {
+      var key = this.getAttribute('data-key');
+      if (STATE.bundleRowsSort.key === key) {
+        STATE.bundleRowsSort.dir = STATE.bundleRowsSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        STATE.bundleRowsSort.key = key;
+        STATE.bundleRowsSort.dir = 'asc';
+      }
+      renderBundleRows();
+    });
+    thead.appendChild(th);
+  }
+}
+
+function syncBundleRowsFilterOptions(rows) {
+  syncBundleRowsFilterSelect('bundle-rows-bundle-filter', rows, 'bundle', 'Все наборы');
+  syncBundleRowsFilterSelect('bundle-rows-spec-filter', rows, 'specification', 'Все спецификации');
+  syncBundleRowsFilterSelect('bundle-rows-source-filter', rows, 'source', 'Все источники');
+}
+
+function syncBundleRowsFilterSelect(id, rows, key, emptyLabel) {
+  var select = document.getElementById(id);
+  if (!select) return;
+  var current = select.value;
+  var values = {};
+
+  for (var i = 0; i < rows.length; i++) {
+    var value = String(rows[i][key] || '').trim();
+    if (value) values[value] = true;
+  }
+
+  var options = Object.keys(values).sort(function(a, b) {
+    return a.localeCompare(b, 'ru', { sensitivity: 'base', numeric: true });
+  });
+
+  select.innerHTML = '';
+  var empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = emptyLabel;
+  select.appendChild(empty);
+
+  for (var j = 0; j < options.length; j++) {
+    var opt = document.createElement('option');
+    opt.value = options[j];
+    opt.textContent = options[j];
+    if (current === options[j]) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+function compareBundleRows(a, b, key) {
+  var av = key === 'active' ? (a.active ? 1 : 0) : a[key];
+  var bv = key === 'active' ? (b.active ? 1 : 0) : b[key];
+  var aNum = parseNumberV2(av);
+  var bNum = parseNumberV2(bv);
+  if (aNum !== null && bNum !== null) return aNum - bNum;
+  return String(av || '').localeCompare(String(bv || ''), 'ru', { sensitivity: 'base', numeric: true });
+}
+
+function getFilteredBundleRows() {
+  var rows = (STATE.bundleData && STATE.bundleData.rows) ? STATE.bundleData.rows.slice() : [];
+  var query = String((document.getElementById('bundle-rows-search') || {}).value || '').toLowerCase().trim();
+  var bundleFilter = (document.getElementById('bundle-rows-bundle-filter') || {}).value || '';
+  var specFilter = (document.getElementById('bundle-rows-spec-filter') || {}).value || '';
+  var sourceFilter = (document.getElementById('bundle-rows-source-filter') || {}).value || '';
+  var activeFilter = (document.getElementById('bundle-rows-active-filter') || {}).value || '';
+
+  rows = rows.filter(function(item) {
+    var haystack = [item.component, item.bundle, item.specification, item.source].join(' ').toLowerCase();
+    if (query && haystack.indexOf(query) < 0) return false;
+    if (bundleFilter && item.bundle !== bundleFilter) return false;
+    if (specFilter && item.specification !== specFilter) return false;
+    if (sourceFilter && item.source !== sourceFilter) return false;
+    if (activeFilter === 'active' && !item.active) return false;
+    if (activeFilter === 'inactive' && item.active) return false;
+    return true;
+  });
+
+  rows.sort(function(a, b) {
+    var cmp = compareBundleRows(a, b, STATE.bundleRowsSort.key);
+    return STATE.bundleRowsSort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  return rows;
+}
+
+function renderBundleRows(rows) {
+  if (rows) {
+    STATE.bundleData = STATE.bundleData || {};
+    STATE.bundleData.rows = rows;
+  }
+
+  var allRows = (STATE.bundleData && STATE.bundleData.rows) ? STATE.bundleData.rows : [];
+  syncBundleRowsFilterOptions(allRows);
+  renderBundleRowsHeaders();
+
+  var tbody = document.getElementById('bundles-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  var filteredRows = getFilteredBundleRows();
+  if (!filteredRows.length) {
+    var trEmpty = document.createElement('tr');
+    trEmpty.innerHTML = '<td colspan="10" class="muted-cell">Нет строк, подходящих под текущие фильтры.</td>';
+    tbody.appendChild(trEmpty);
+    return;
+  }
+
+  for (var i = 0; i < filteredRows.length; i++) {
+    var item = filteredRows[i];
+    var tr = document.createElement('tr');
+    if (item.active) tr.classList.add('bundle-active-row');
+    tr.innerHTML =
+      '<td>' + esc(item.component) + '</td>' +
+      '<td>' + esc(item.bundle) + '</td>' +
+      '<td>' + esc(item.specification) + '</td>' +
+      '<td class="num">' + fmt(item.quantity) + '</td>' +
+      '<td>' + (item.active ? '<span class="badge badge-flakon">Да</span>' : '—') + '</td>' +
+      '<td class="num">' + fmt(item.cost1C) + '</td>' +
+      '<td class="num' + (parseNumberV2(item.calcCost) === 0 ? ' zero-value' : '') + '">' + fmt(item.calcCost) + '</td>' +
+      '<td class="num' + (item.manualCost === '' ? '' : ' bundle-manual-cost') + '">' + (item.manualCost === '' ? '—' : fmt(item.manualCost)) + '</td>' +
+      '<td class="num col-total">' + fmt(item.usedCost) + '</td>' +
+      '<td>' + esc(item.source || '') + '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function filterBundleRowsTable() {
+  renderBundleRows();
+}
+
+function collectBundlePayload() {
+  var activeSpecs = {};
+  var manualCosts = {};
+  var specSelects = document.querySelectorAll('#bundle-spec-tbody select[data-bundle]');
+  var manualInputs = document.querySelectorAll('#bundle-manual-tbody input[data-component]');
+
+  for (var i = 0; i < specSelects.length; i++) {
+    activeSpecs[specSelects[i].getAttribute('data-bundle')] = specSelects[i].value;
+  }
+  for (var j = 0; j < manualInputs.length; j++) {
+    var raw = String(manualInputs[j].value || '').trim();
+    manualCosts[manualInputs[j].getAttribute('data-component')] = raw === '' ? '' : parseFloat(raw);
+  }
+
+  return {
+    activeSpecs: activeSpecs,
+    manualCosts: manualCosts
+  };
+}
 </script>
