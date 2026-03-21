@@ -445,13 +445,15 @@ function getBundleStats() {
   for (i = 0; i < data.rows.length; i++) {
     if (String(data.rows[i][11] || '').trim() === 'Да') {
       totalSets++;
-      knownSetNames[String(data.rows[i][0] || '').trim()] = true;
+      var setKey = normalizeMatchKey_(data.rows[i][0]);
+      if (setKey) knownSetNames[setKey] = true;
     }
   }
 
   var bundleRows = getStoredBundleRows_();
   for (i = 0; i < bundleRows.length; i++) {
-    if (bundleRows[i].bundle && knownSetNames[bundleRows[i].bundle]) linked[bundleRows[i].bundle] = true;
+    var bundleKey = normalizeMatchKey_(bundleRows[i].bundle);
+    if (bundleKey && knownSetNames[bundleKey]) linked[bundleKey] = true;
   }
 
   return {
