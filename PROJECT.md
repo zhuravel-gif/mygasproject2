@@ -1,13 +1,13 @@
-# mygasproject2 — Project Reference
+# mygasproject2 - Project Reference
 
 ## Purpose
 
-Google Apps Script WebApp for cost calculation inside the same Google Sheets document from which the script is launched. The project imports nomenclature and prices from local Excel files, calculates item cost, calculates flakon cost separately, and writes calculation results back to sheets in the active spreadsheet.
+Google Apps Script WebApp for себестоимость calculation inside the same Google Sheets document from which the script is launched. The app imports local Excel files, maintains working reference sheets, calculates cost for raw items, finished goods, flakons, and bundles, and writes calculation snapshots back to the active spreadsheet.
 
 ## Stack
 
-- Google Apps Script (server-side)
-- HTML/CSS/JavaScript WebApp UI
+- Google Apps Script
+- HTML / CSS / vanilla JavaScript WebApp UI
 - `clasp` for local development and deployment
 - local `SheetJS` bundle in `SheetJsLib.html` for `.xls/.xlsx` import and `.xlsx` export
 
@@ -15,73 +15,76 @@ Google Apps Script WebApp for cost calculation inside the same Google Sheets doc
 
 | File | Role |
 |---|---|
-| `Код.js` | GAS entry points: `doGet()`, `include()`, `onOpen()`, `openWebApp()` |
-| `DataService.js` | Server-side work with Google Sheets, imports, params, flakons, result sheets, meta storage |
-| `CalcEngine.js` | Core calculation logic for items and flakons |
-| `WebApp.html` | Main WebApp layout and tabs |
-| `Scripts.html` | All client-side logic for tabs, filters, sorting, import flow, exports |
-| `Styles.html` | All styles for the WebApp |
+| `Код.js` | GAS entry points, menu, modal open, project sheet reset |
+| `DataService.js` | Server-side imports, sheet I/O, params, flakons, bundles, result sheets, meta storage |
+| `CalcEngine.js` | Core calculation logic for all item types, flakons, bundles, verification payloads |
+| `WebApp.html` | Main WebApp layout and tab structure |
+| `Scripts.html` | Client logic for tabs, filters, sorting, import flow, exports, editable tables |
+| `Styles.html` | Full WebApp styling |
 | `SheetJsLib.html` | Local SheetJS bundle |
 | `appsscript.json` | GAS manifest |
 | `.clasp.json` | `clasp` project config |
 
 ## Google Sheets usage
 
-The project works only with the current spreadsheet via `SpreadsheetApp.getActiveSpreadsheet()`. It does not use `openById()` and does not connect to an external spreadsheet.
+The project works only with the current spreadsheet through `SpreadsheetApp.getActiveSpreadsheet()`. It does not use `openById()` and does not connect to any external spreadsheet.
 
 ### Sheets used in the active spreadsheet
 
 | Sheet | Purpose | Created automatically |
 |---|---|---|
-| `1cData` | Main import sheet. Stores imported nomenclature plus cost fields used by all calculations. | Yes |
-| `Флаконы` | Flakon reference and flakon cost calculation sheet. Stores manual and calculated flakon data. | Yes |
-| `basis` | Parameters sheet. Stores `usd`, `rmb`, `log`, `com`, `log_fl`, `com_fl`. | Yes |
-| `Результаты dd.MM.yyyy HH:mm` | Snapshot sheets with saved calculation results. A new sheet is created on each save. | Yes |
-| `__meta` | Hidden technical sheet for saved import mappings and default import rates. | Yes |
+| `1cData` | Main import sheet. Stores imported nomenclature and calculation source fields. | Yes |
+| `Флаконы` | Flakon reference and flakon cost calculation sheet. | Yes |
+| `Наборы` | Bundle composition sheet with active specification, cost sources and manual fallback costs. | Yes |
+| `basis` | Parameters sheet. Stores global calculation parameters and default rates. | Yes |
+| `Результаты dd.MM.yyyy HH:mm` | Snapshot sheets with saved calculation results. | Yes |
+| `__meta` | Hidden technical sheet for saved import mappings and defaults. | Yes |
 
 ## Data model
 
 ### Sheet `1cData`
 
-Project schema is fixed to 18 columns.
+Fixed 18-column working schema:
 
-| Col | Index | Key | Label |
+| Col | Index | Key | Meaning |
 |---|---|---|---|
-| A | 0 | `name` | `Номенклатура.Наименование` |
-| B | 1 | `article` | `Артикул` |
-| C | 2 | `articleWb` | `Артикул ВБ` |
-| D | 3 | `category` | `Категория товаров` |
-| E | 4 | `volume` | `Объем тары` |
-| F | 5 | `group2` | `Номенклатура.Товарная группа 2 (Общие)` |
-| G | 6 | `group3` | `Номенклатура.Товарная группа 3 (Общие)` |
-| H | 7 | `raw` | `Номенклатура.Основное сырье (Общие)` |
-| I | 8 | `flakon` | `Номенклатура.Тара (флакон) (Общие)` |
-| J | 9 | `setQty` | `Номенклатура.Количество лаков в наборе (Общие)` |
-| K | 10 | `articleMp` | `Номенклатура.Артикул МП` |
-| L | 11 | `isSet` | `Номенклатура.Это набор (RockNail)` |
-| M | 12 | `weight` | `Номенклатура.Вес (числитель)` |
-| N | 13 | `group1` | `Номенклатура.Товарная группа 1 (Общие)` |
-| O | 14 | `cost1C` | `Себестоимость 1С` |
-| P | 15 | `supplierPrice` | `Цена поставщика` |
-| Q | 16 | `nds` | `НДС` |
-| R | 17 | `tax` | `Пошлина` |
+| A | 0 | `name` | Item name |
+| B | 1 | `article` | Article |
+| C | 2 | `articleWb` | WB article |
+| D | 3 | `category` | Category |
+| E | 4 | `volume` | Container volume |
+| F | 5 | `group2` | Product group 2 |
+| G | 6 | `group3` | Product group 3 |
+| H | 7 | `raw` | Main raw material |
+| I | 8 | `flakon` | Flakon / tara |
+| J | 9 | `setQty` | Quantity inside set |
+| K | 10 | `articleMp` | Marketplace article |
+| L | 11 | `isSet` | Set flag (`Да` / `Нет`) |
+| M | 12 | `weight` | Weight |
+| N | 13 | `group1` | Product group 1 |
+| O | 14 | `cost1C` | Cost from 1C |
+| P | 15 | `supplierPrice` | Supplier price |
+| Q | 16 | `nds` | NDS |
+| R | 17 | `tax` | Duty |
 
 ### Sheet `basis`
 
-Stored as a 6-column parameter row:
+Stored as one parameter row:
 
 | Col | Key | Meaning |
 |---|---|---|
 | A | `usd` | USD exchange rate |
 | B | `rmb` | RMB exchange rate |
-| C | `log` | Base logistics |
-| D | `com` | Base commission |
-| E | `logFl` | Logistics for flakons |
-| F | `comFl` | Commission for flakons |
+| C | `log` | Logistics rate for regular items |
+| D | `com` | Commission multiplier for regular items |
+| E | `logFl` | Logistics rate for flakons |
+| F | `comFl` | Commission multiplier for flakons |
+| G | `importNds` | Default import NDS |
+| H | `importTax` | Default import duty |
+| I | `flakonNds` | Default flakon NDS |
+| J | `flakonTax` | Default flakon duty |
 
 ### Sheet `Флаконы`
-
-Current stored schema:
 
 | Col | Key | Meaning |
 |---|---|---|
@@ -95,7 +98,22 @@ Current stored schema:
 | H | `rawFl` | Flakon raw cost in RUB |
 | I | `deliveryFl` | Flakon delivery in RUB |
 | J | `taxDutyFl` | Flakon NDS + duty |
-| K | `totalFl` | Total flakon cost |
+| K | `totalFl` | Final flakon cost |
+
+### Sheet `Наборы`
+
+| Col | Key | Meaning |
+|---|---|---|
+| A | `component` | Component name inside the bundle |
+| B | `bundle` | Bundle name |
+| C | `specification` | Bundle specification name |
+| D | `quantity` | Quantity of the component in the bundle |
+| E | `active` | Active specification flag |
+| F | `cost1C` | Component 1C cost pulled from `1cData` |
+| G | `calcCost` | Component calculated cost pulled from calculation engine |
+| H | `manualCost` | Manual RUB fallback cost |
+| I | `usedCost` | Effective cost used for the bundle calculation |
+| J | `source` | Cost source (`Расчёт`, `Ручная стоимость`, `Нет данных`, etc.) |
 
 ### Result sheets `Результаты ...`
 
@@ -104,49 +122,28 @@ Saved result schema:
 | Col | Key | Meaning |
 |---|---|---|
 | A | `name` | Item name |
-| B | `type` | Item type |
-| C | `raw` | Raw material cost |
-| D | `taxDuty` | NDS + duty |
-| E | `delivery` | Delivery |
-| F | `rawFl` | Flakon raw cost |
-| G | `deliveryFl` | Flakon delivery |
-| H | `taxDutyFl` | Flakon NDS + duty |
-| I | `label` | Label cost |
-| J | `totalFl` | Flakon total |
-| K | `total` | Final total cost |
-| L | `cost1C` | Cost from 1C |
-| M | `diff` | Difference vs 1C |
-| N | `diffPct` | Difference percent |
+| B | `flakonName` | Flakon name |
+| C | `category` | Category |
+| D | `type` | Item type |
+| E | `raw` | Raw material cost |
+| F | `taxDuty` | NDS + duty |
+| G | `delivery` | Delivery |
+| H | `rawFl` | Flakon raw cost |
+| I | `deliveryFl` | Flakon delivery |
+| J | `taxDutyFl` | Flakon NDS + duty |
+| K | `label` | Label cost |
+| L | `totalFl` | Flakon total |
+| M | `total` | Final total cost |
+| N | `cost1C` | Cost from 1C |
+| O | `diff` | Difference vs 1C |
+| P | `diffPct` | Difference percent |
 
 ## Current WebApp tabs
 
-### 1. `Импорт данных`
+### 1. `Параметры`
 
 Purpose:
-- build base `1cData` from a local Excel file
-- import current 1C cost into `Себестоимость 1С`
-- import supplier prices into `Цена поставщика`
-- manually edit `Цена поставщика`, `НДС`, `Пошлина`
-
-Current behavior:
-- file import is local through `input[type=file]` + SheetJS
-- user selects file, sheet, header row, and column mapping
-- import mappings are stored in `__meta` and reused later
-- for value imports matching is:
-  - first by normalized item name
-  - fallback by article
-- `НДС` and `Пошлина` can be set as defaults on first nomenclature import
-- `НДС`, `Пошлина`, `Цена поставщика` can be edited manually in the table
-- table supports:
-  - search
-  - slicers above the table
-  - column sorting
-  - sticky first four displayed columns
-
-### 2. `Параметры`
-
-Purpose:
-- edit calculation parameters used by item and flakon formulas
+- maintain all calculation parameters and default import/flakon rates
 
 Current fields:
 - `usd`
@@ -155,97 +152,165 @@ Current fields:
 - `com`
 - `log_fl`
 - `com_fl`
+- `НДС для импорта`
+- `Пошлина для импорта`
+- `НДС для флаконов`
+- `Пошлина для флаконов`
+
+### 2. `Импорт данных`
+
+Purpose:
+- rebuild base `1cData`
+- import 1C cost
+- import supplier prices
+- import bundle compositions
+- manually edit `Цена поставщика`, `НДС`, `Пошлина`
+
+Current behavior:
+- local file import through `input[type=file]` + local SheetJS
+- user selects file, sheet, header row and mapping
+- mappings are stored in `__meta`
+- cost and price imports match first by normalized item name, then by article
+- table supports:
+  - search
+  - slicers
+  - header sorting
+  - sticky first displayed columns
+- import stats include:
+  - total rows
+  - raw / finished / sets counts
+  - filled 1C cost count
+  - filled supplier price count
+  - loaded bundle composition count
 
 ### 3. `Флаконы`
 
 Purpose:
 - maintain flakon list
-- calculate flakon cost blocks used in item costing
+- calculate flakon cost block used in item costing
 
 Current behavior:
-- flakon list is built from unique values of `Тара (флакон)` in `1cData`
-- data is merged with the saved `Флаконы` sheet
-- `Объём`, `Вес`, `Цена поставщика` are mapped by rule:
-  - `Флакон` equals `Наименование` in `1cData`
-- manual values are preserved by flakon name:
+- list is built from unique values of `Тара (флакон)` in `1cData`
+- source mapping for `Объём`, `Вес`, `Цена поставщика` uses:
+  - `Флакон` = `Наименование` in `1cData`
+- user can edit:
   - `Цена поставщика`
   - `НДС`
   - `Пошлина`
   - `Этикетка`
 - buttons:
-  - `Обновить` rebuilds the list from `1cData`
-  - `Пересчитать` recalculates only computed columns without page reload
-  - `Сохранить` writes the current table to sheet `Флаконы`
-- tab also contains an instruction block for the user
+  - `Обновить`
+  - `Пересчитать`
+  - `Сохранить`
 
-### 4. `Себестоимость`
+### 4. `Наборы`
+
+Purpose:
+- import and maintain bundle compositions
+- select active specification per bundle
+- assign manual fallback costs for repeated components without found себестоимость
+
+Current behavior:
+- bundle import reads local Excel report rows with:
+  - component
+  - bundle
+  - specification
+  - quantity
+- one bundle may have multiple specifications
+- active specification is chosen manually in the top table
+- top table now:
+  - shows all bundle positions found in `1cData`
+  - highlights bundles without matched compositions
+  - supports simple filtering and header sorting
+- manual cost block stores one fallback RUB cost per unresolved component
+- lower composition table shows:
+  - component
+  - bundle
+  - specification
+  - quantity
+  - active flag
+  - 1C component cost
+  - calculated component cost
+  - manual fallback
+  - used effective cost
+  - source
+- lower table supports:
+  - simple slicers
+  - search
+  - header sorting
+
+### 5. `Себестоимость`
 
 Purpose:
 - run full cost calculation for all rows from `1cData`
 
 Current behavior:
-- button `Рассчитать` runs `calculateAll(params)`
-- table supports:
-  - search
-  - slicers
-  - sorting by clicking headers
-  - zero-value highlighting for numeric cells
-- button `Выгрузить в Excel` exports the full result set to `.xlsx`
-- button `Записать результаты на лист` creates a new `Результаты ...` sheet
+- supports search, slicers, sorting and zero-value highlighting
+- export to `.xlsx`
+- save results to dated sheets
+- types currently supported:
+  - `Сырьё`
+  - `Готовый товар`
+  - `Флакон`
+  - `Наборы`
 
-### 5. `Калькулятор`
+### 6. `Калькулятор`
 
 Purpose:
 - manual one-item calculation
 
 Current behavior:
-- user can select an existing item or enter values manually
-- uses the same calculation engine as batch calculation
+- can work from selected `1cData` item or fully manual input
+- supports flakon overrides
+- uses the same engine as batch calculation
+- bundle logic is also routed through the same engine
 
-### 6. `Проверка`
+### 7. `Проверка`
 
 Purpose:
 - show step-by-step formula breakdown for a selected item
 
 Current behavior:
-- uses `getVerification(index, params)`
-- shows formulas, substitutions and intermediate results for both item and flakon parts
+- uses the same engine payload as calculator verification
+- includes bundle calculation breakdown by active specification and component costs
 
 ## Server-side API
 
-### Entry points
+### Entry points in `Код.js`
 
-Defined in `Код.js`:
 - `doGet()`
 - `include(filename)`
 - `onOpen()`
 - `openWebApp()`
+- `resetProjectSheets()`
 
 ### Main public functions in `DataService.js`
 
 | Function | Purpose |
 |---|---|
-| `getData()` | Returns `{ headers, rows }` from `1cData` |
-| `getDataHeaders()` | Returns project header schema |
-| `getImportSettings()` | Returns saved import mappings and default rates from `__meta` |
-| `importBaseNomenclature(payload)` | Rebuilds `1cData` from mapped nomenclature import |
-| `importCurrentCost(payload)` | Updates `Себестоимость 1С` in `1cData` |
-| `importSupplierPriceData(payload)` | Updates `Цена поставщика` in `1cData` |
-| `updateImportRows(updates)` | Batch-save manual edits in import table |
-| `updateNdsTax(updates)` | Alias of `updateImportRows` |
-| `updateAllNdsTax(nds, tax)` | Applies the same NDS and duty to all rows |
-| `getParams()` | Loads parameters from `basis` |
-| `saveParams(params)` | Saves parameters to `basis` |
-| `getFlakonList()` | Builds/returns normalized flakon list |
-| `recalculateFlakonData(flakons)` | Recalculates computed flakon columns only |
-| `saveFlakonData(flakons)` | Saves the flakon table to sheet `Флаконы` |
-| `saveResults(results)` | Creates a dated `Результаты ...` sheet |
+| `getData()` | Return `{ headers, rows }` from `1cData` |
+| `getImportSettings()` | Return saved import mappings and default rates |
+| `importBaseNomenclature(payload)` | Rebuild `1cData` from mapped nomenclature import |
+| `importCurrentCost(payload)` | Update `Себестоимость 1С` in `1cData` |
+| `importSupplierPriceData(payload)` | Update `Цена поставщика` in `1cData` |
+| `importBundleCompositions(payload)` | Import and normalize bundle composition rows into sheet `Наборы` |
+| `updateImportRows(updates)` | Batch-save manual import table edits |
+| `getParams()` | Load params from `basis` |
+| `saveParams(params)` | Save params to `basis` |
+| `getFlakonList()` | Build / return normalized flakon list |
+| `recalculateFlakonData(flakons)` | Recalculate flakon computed columns only |
+| `saveFlakonData(flakons)` | Save flakon table to `Флаконы` |
+| `getBundleData()` | Return normalized bundle UI payload |
+| `getBundleStats()` | Return bundle import counters for the import tab |
+| `saveBundleData(payload)` | Save active specifications and manual component costs |
+| `saveResults(results)` | Create a dated result sheet |
 
 ## Calculation engine
 
-### Item type detection
+### Type detection
 
 Defined in `CalcEngine.js`:
+- `Флакон` if item name matches a flakon row
 - `Наборы` if `Это набор = Да`
 - `Готовый товар` if there is no raw material
 - `Сырьё` otherwise
@@ -254,11 +319,11 @@ Defined in `CalcEngine.js`:
 
 | Function | Purpose |
 |---|---|
-| `determineType(row)` | Detects item type |
-| `calculateAll(params)` | Calculates full `1cData` |
-| `calculateByIndex(index, params)` | Calculates one row by index |
-| `calculateManual(input)` | Calculates one manual item |
-| `getVerification(index, params)` | Returns a formula breakdown |
+| `determineType(row)` | Detect item type |
+| `calculateAll(params)` | Calculate all rows from `1cData` |
+| `calculateByIndex(index, params)` | Calculate one row by index |
+| `calculateManual(input)` | Calculate one manual item |
+| `getVerification(index, params)` | Return verification payload |
 
 ### Core item formulas
 
@@ -275,39 +340,52 @@ For `Сырьё`:
 - `taxDuty = (raw + delivery + raw * tax) * nds + raw * tax`
 - flakon block is added from `Флаконы`
 
-Final:
-
-- `total = raw + taxDuty + delivery + totalFl`
-- `diff = total - cost1C`
-- `diffPct = (total - cost1C) / cost1C`
-
-### Flakon formulas
-
-Flakon metrics are calculated from flakon row data plus `log_fl` and `com_fl`:
+For flakons:
 
 - `rawFl = supplierPrice * rmb * comFl`
 - `deliveryFl = logFl * weight * 1.15 * usd * comFl`
 - `taxDutyFl = (rawFl + deliveryFl + rawFl * tax) * nds + rawFl * tax`
 - `totalFl = rawFl + deliveryFl + taxDutyFl + label`
 
+For bundles:
+
+- active specification is selected per bundle
+- bundle total = sum of all active specification component lines
+- for each component line:
+  - first try calculated component total
+  - if missing, use manual fallback cost
+  - if still missing, use `0`
+- line total = `usedCost * quantity`
+- bundle total = sum of all line totals
+
+Final item output:
+
+- `total = raw + taxDuty + delivery + totalFl`
+- for bundles, `total` is the bundle total from active composition
+- `diff = total - cost1C`
+- `diffPct = (total - cost1C) / cost1C`
+
 ## Client-side notes
 
-Main state in `Scripts.html` includes:
+Main client state in `Scripts.html` includes:
 
-- imported table data
-- calculated results
+- imported `1cData`
+- calculated result set
 - flakon list
-- current params
-- import mapping state
-- slicer and sorting state for tables
+- bundle UI payload
+- params
+- import mapping context
+- table filter and sorting state
 
 Important client capabilities:
 
 - local Excel import through SheetJS
-- local Excel export for the cost tab
-- table search, slicers, sorting
-- manual batch-saving of editable table fields
-- user instruction blocks on key tabs
+- `.xlsx` export for cost results
+- editable import table
+- editable flakon table
+- bundle specification selection and manual fallback costs
+- search, slicers and sorting on working tables
+- instruction blocks on operational tabs
 
 ## Sample input files
 
@@ -318,11 +396,11 @@ Folder: `.sample data`
 | `1.xlsx` | Base nomenclature import example |
 | `2.xls` | Current cost import example |
 | `3.xlsx` | Supplier price import example |
+| `4.xlsx` | Bundle composition import example |
 
 ## `clasp` notes
 
 - project config is in `.clasp.json`
 - `rootDir` is the repository root
 - deploy from project root with `clasp push`
-- after push, if the WebApp URL still shows old behavior, update the Apps Script deployment version in GAS
-
+- if the WebApp URL still shows old behavior after push, update the Apps Script deployment version in GAS
