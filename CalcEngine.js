@@ -95,7 +95,261 @@ function buildFlakonMap(flakons) {
   return map;
 }
 
-function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
+function buildDataRowMap_(rows) {
+  var map = {};
+  for (var i = 0; i < (rows || []).length; i++) {
+    var key = normalizeMatchKey_(rows[i][COL.NAME]);
+    if (key && !map.hasOwnProperty(key)) map[key] = rows[i];
+  }
+  return map;
+}
+
+function buildBundleContext_(params, flakonMap, dataRows) {
+  var bundleRows = typeof getStoredBundleRows_ === 'function' ? getStoredBundleRows_() : [];
+  var bundles = {};
+  var dataRowMap = buildDataRowMap_(dataRows || []);
+
+  for (var i = 0; i < bundleRows.length; i++) {
+    var row = bundleRows[i];
+    var bundleName = String(row.bundle || '').trim();
+    var specName = String(row.specification || '').trim();
+    if (!bundleName || !specName) continue;
+
+    if (!bundles[bundleName]) {
+      bundles[bundleName] = { specs: {}, specList: [], activeSpec: '' };
+    }
+    if (!bundles[bundleName].specs[specName]) {
+      bundles[bundleName].specs[specName] = [];
+      bundles[bundleName].specList.push(specName);
+    }
+
+    bundles[bundleName].specs[specName].push(row);
+    if (row.active) bundles[bundleName].activeSpec = specName;
+  }
+
+  var bundleNames = Object.keys(bundles);
+  for (var j = 0; j < bundleNames.length; j++) {
+    var bundle = bundles[bundleNames[j]];
+    if (!bundle.activeSpec) bundle.activeSpec = bundle.specList[0] || '';
+  }
+
+  return {
+    params: params || {},
+    flakonMap: flakonMap || {},
+    dataRows: dataRows || [],
+    dataRowMap: dataRowMap,
+    bundles: bundles,
+    cache: {}
+  };
+}
+
+function getBundleDefinition_(bundleName, bundleContext) {
+  if (!bundleContext || !bundleContext.bundles) return null;
+  return bundleContext.bundles[String(bundleName || '').trim()] || null;
+}
+
+function getBundleActiveRows_(bundleName, bundleContext) {
+  var bundleDef = getBundleDefinition_(bundleName, bundleContext);
+  if (!bundleDef) return [];
+  return bundleDef.specs[bundleDef.activeSpec] || [];
+}
+
+function buildBundleItemSource_(calcCost, manualCost, detailsSource) {
+  if (calcCost > 0) return detailsSource || 'Расчёт';
+  if (manualCost > 0) return 'Ручная стоимость';
+  return 'Нет данных';
+}
+
+function calculateNamedCostInfo_(name, bundleContext, stack) {
+  var key = normalizeMatchKey_(name);
+  if (!key) {
+    return { total: 0, source: 'Нет данных', type: '', specification: '', items: [] };
+  }
+  if (!bundleContext) {
+    return { total: 0, source: 'Нет данных', type: '', specification: '', items: [] };
+  }
+  if (bundleContext.cache.hasOwnProperty(key)) return bundleContext.cache[key];
+
+  stack = stack || {};
+  if (stack[key]) {
+    return { total: 0, source: 'Циклическая ссылка', type: 'Наборы', specification: '', items: [] };
+  }
+
+  var nextStack = {};
+  for (var prop in stack) {
+    if (stack.hasOwnProperty(prop)) nextStack[prop] = true;
+  }
+  nextStack[key] = true;
+
+  var row = bundleContext.dataRowMap[key];
+  var result;
+
+  if (row) {
+    var type = determineType(row, bundleContext.flakonMap);
+    if (type === 'Наборы') {
+      result = calculateBundleCostByName_(String(row[COL.NAME] || name), row, bundleContext, nextStack);
+    } else {
+      var calcResult = calculateOne(row, bundleContext.params, bundleContext.flakonMap, type, null, bundleContext, nextStack);
+      result = {
+        total: round2_(calcResult.total),
+        source: 'Расчёт',
+        type: calcResult.type,
+        specification: '',
+        items: [],
+        result: calcResult
+      };
+    }
+  } else {
+    result = { total: 0, source: 'Нет данных', type: '', specification: '', items: [] };
+  }
+
+  bundleContext.cache[key] = result;
+  return result;
+}
+
+function calculateBundleCostByName_(bundleName, row, bundleContext, stack) {
+  var bundleDef = getBundleDefinition_(bundleName, bundleContext);
+  var cost1C = row ? toNumber_(row[COL.COST_1C], 0) : 0;
+  var result = {
+    total: 0,
+    source: 'Нет комплектации',
+    type: 'Наборы',
+    specification: '',
+    items: [],
+    cost1C: cost1C
+  };
+
+  if (!bundleDef) return result;
+
+  var activeSpec = bundleDef.activeSpec || '';
+  var activeRows = bundleDef.specs[activeSpec] || [];
+  var total = 0;
+  var items = [];
+
+  for (var i = 0; i < activeRows.length; i++) {
+    var componentRow = activeRows[i];
+    var componentName = String(componentRow.component || '').trim();
+    var quantity = toNumber_(componentRow.quantity, 1);
+    var costInfo = calculateNamedCostInfo_(componentName, bundleContext, stack);
+    var calcCost = round2_(toNumber_(costInfo.total, 0));
+    var manualCost = componentRow.manualCost === '' ? 0 : round2_(toNumber_(componentRow.manualCost, 0));
+    var usedCost = calcCost > 0 ? calcCost : manualCost;
+    var lineTotal = round2_(usedCost * quantity);
+    total += lineTotal;
+
+    items.push({
+      component: componentName,
+      quantity: quantity,
+      cost1C: toNumber_(componentRow.cost1C, 0),
+      calcCost: calcCost,
+      manualCost: manualCost,
+      usedCost: usedCost,
+      total: lineTotal,
+      source: buildBundleItemSource_(calcCost, manualCost, costInfo.source)
+    });
+  }
+
+  result.total = round2_(total);
+  result.source = activeRows.length ? 'Комплектация набора' : 'Нет строк активной спецификации';
+  result.specification = activeSpec;
+  result.items = items;
+  return result;
+}
+
+function buildBundleUiState_() {
+  var params = getParams();
+  var dataObj = getData();
+  var flakonMap = buildFlakonMap(getFlakonList());
+  var bundleContext = buildBundleContext_(params, flakonMap, dataObj.rows || []);
+  var storedRows = typeof getStoredBundleRows_ === 'function' ? getStoredBundleRows_() : [];
+  var resolvedRows = [];
+  var bundleNames = {};
+  var knownSetNames = {};
+  var manualMap = {};
+  var i;
+
+  for (i = 0; i < (dataObj.rows || []).length; i++) {
+    if (String(dataObj.rows[i][COL.IS_SET] || '').trim() === 'Да') {
+      knownSetNames[String(dataObj.rows[i][COL.NAME] || '').trim()] = true;
+    }
+  }
+
+  for (i = 0; i < storedRows.length; i++) {
+    var item = storedRows[i];
+    var info = calculateNamedCostInfo_(item.component, bundleContext, {});
+    var calcCost = round2_(toNumber_(info.total, 0));
+    var manualCost = item.manualCost === '' ? '' : round2_(toNumber_(item.manualCost, 0));
+    var usedCost = calcCost > 0 ? calcCost : (manualCost === '' ? 0 : manualCost);
+    var componentRow = bundleContext.dataRowMap[normalizeMatchKey_(item.component)] || null;
+    var cost1C = componentRow ? toNumber_(componentRow[COL.COST_1C], 0) : 0;
+    var source = buildBundleItemSource_(calcCost, manualCost === '' ? 0 : manualCost, info.source);
+
+    resolvedRows.push({
+      component: item.component,
+      bundle: item.bundle,
+      specification: item.specification,
+      quantity: toNumber_(item.quantity, 1),
+      active: !!item.active,
+      cost1C: round2_(cost1C),
+      calcCost: calcCost,
+      manualCost: manualCost,
+      usedCost: round2_(usedCost),
+      source: source
+    });
+
+    bundleNames[item.bundle] = true;
+
+    var manualKey = normalizeMatchKey_(item.component);
+    if (!manualMap[manualKey] && calcCost <= 0) {
+      manualMap[manualKey] = {
+        component: item.component,
+        manualCost: manualCost === '' ? '' : manualCost,
+        usageCount: 1
+      };
+    } else if (manualMap[manualKey] && calcCost <= 0) {
+      manualMap[manualKey].usageCount++;
+      if (manualMap[manualKey].manualCost === '' && manualCost !== '') {
+        manualMap[manualKey].manualCost = manualCost;
+      }
+    }
+  }
+
+  resolvedRows.sort(function(a, b) {
+    if (a.bundle !== b.bundle) return a.bundle.localeCompare(b.bundle, 'ru', { sensitivity: 'base', numeric: true });
+    if (a.specification !== b.specification) return a.specification.localeCompare(b.specification, 'ru', { sensitivity: 'base', numeric: true });
+    return a.component.localeCompare(b.component, 'ru', { sensitivity: 'base', numeric: true });
+  });
+
+  var bundleSummary = [];
+  var bundleKeys = Object.keys(bundleContext.bundles);
+  for (i = 0; i < bundleKeys.length; i++) {
+    var bundleName = bundleKeys[i];
+    bundleSummary.push({
+      bundle: bundleName,
+      activeSpec: bundleContext.bundles[bundleName].activeSpec || '',
+      specs: bundleContext.bundles[bundleName].specList.slice()
+    });
+  }
+  bundleSummary.sort(function(a, b) {
+    return a.bundle.localeCompare(b.bundle, 'ru', { sensitivity: 'base', numeric: true });
+  });
+
+  return {
+    rows: resolvedRows,
+    bundles: bundleSummary,
+    manualItems: mapValues_(manualMap).sort(function(a, b) {
+      return a.component.localeCompare(b.component, 'ru', { sensitivity: 'base', numeric: true });
+    }),
+    stats: {
+      totalSets: Object.keys(knownSetNames).length,
+      loadedBundles: bundleSummary.filter(function(item) { return knownSetNames[item.bundle]; }).length,
+      compositionRows: resolvedRows.length,
+      unresolvedComponents: mapValues_(manualMap).length
+    }
+  };
+}
+
+function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bundleContext, stack) {
   params = params || {};
   flakonMap = flakonMap || {};
 
@@ -132,11 +386,19 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride) {
     total: 0,
     cost1C: cost1C,
     diff: 0,
-    diffPct: 0
+    diffPct: 0,
+    bundleSpec: '',
+    bundleItems: []
   };
 
   if (type === 'Наборы') {
-    result.diff = cost1C > 0 ? -cost1C : 0;
+    var runtimeContext = bundleContext || buildBundleContext_(params, flakonMap, getData().rows || []);
+    var bundleCalc = calculateBundleCostByName_(name, row, runtimeContext, stack || {});
+    result.total = round2_(bundleCalc.total);
+    result.bundleSpec = bundleCalc.specification || '';
+    result.bundleItems = bundleCalc.items || [];
+    result.diff = cost1C > 0 ? round2_(result.total - cost1C) : 0;
+    result.diffPct = cost1C > 0 ? round4_((result.total - cost1C) / cost1C) : 0;
     return result;
   }
 
@@ -215,10 +477,11 @@ function calculateAll(params) {
 
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
+  var bundleContext = buildBundleContext_(params || {}, flakonMap, dataObj.rows || []);
   var results = [];
 
   for (var i = 0; i < dataObj.rows.length; i++) {
-    results.push(calculateOne(dataObj.rows[i], params || {}, flakonMap));
+    results.push(calculateOne(dataObj.rows[i], params || {}, flakonMap, null, null, bundleContext, {}));
   }
 
   saveParams(params || {});
@@ -234,7 +497,8 @@ function calculateByIndex(index, params) {
 
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
-  return calculateOne(dataObj.rows[index], params || {}, flakonMap);
+  var bundleContext = buildBundleContext_(params || {}, flakonMap, dataObj.rows || []);
+  return calculateOne(dataObj.rows[index], params || {}, flakonMap, null, null, bundleContext, {});
 }
 
 function hasManualFlakonInput_(manualFlakon) {
@@ -261,12 +525,12 @@ function applyManualFlakonOverride_(flakonMap, flakonName, manualFlakon, params)
   };
 }
 
-function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonNameOverride, sourceLabel) {
+function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonNameOverride, sourceLabel, bundleContext) {
   params = params || {};
   flakonMap = flakonMap || {};
 
   var type = determineType(row, flakonMap, forcedType);
-  var result = calculateOne(row, params, flakonMap, forcedType, flakonNameOverride);
+  var result = calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bundleContext, {});
   var priceVal = toNumber_(row[COL.PRICE], 0);
   var ndsRate = toNumber_(row[COL.NDS], 0.22);
   var taxRate = toNumber_(row[COL.TAX], 0.065);
@@ -306,10 +570,18 @@ function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonName
 
   if (type === 'Наборы') {
     steps.push({
-      title: 'Наборы не рассчитываются',
-      formula: '',
-      result: '0.00'
+      title: 'Активная спецификация набора',
+      formula: 'Для набора используется выбранная пользователем активная спецификация',
+      result: result.bundleSpec || 'Не выбрана'
     });
+    for (var itemIdx = 0; itemIdx < (result.bundleItems || []).length; itemIdx++) {
+      var bundleItem = result.bundleItems[itemIdx];
+      steps.push({
+        title: 'Компонент: ' + bundleItem.component,
+        formula: 'Количество ' + bundleItem.quantity + ' × стоимость ' + bundleItem.usedCost.toFixed(2) + ' [' + bundleItem.source + ']',
+        result: bundleItem.total.toFixed(2)
+      });
+    }
   } else if (type === 'Готовый товар') {
     steps.push({
       title: 'Сырьё',
@@ -449,6 +721,8 @@ function calculateManual(input) {
 
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
+  var dataObj = getData();
+  var bundleContext = buildBundleContext_(input, flakonMap, dataObj.rows || []);
   var manualFlakon = input.manualFlakon || {};
   var flakonNameOverride = String(input.flakonName || '').trim();
   if (!flakonNameOverride && (input.type === 'Флакон' || hasManualFlakonInput_(manualFlakon))) {
@@ -462,7 +736,7 @@ function calculateManual(input) {
     ? 'Флакон и его параметры заданы вручную'
     : (flakonNameOverride ? 'Использован выбранный флакон с возможностью ручной корректировки' : '');
 
-  return buildCalculationPayload_(row, input, flakonMap, input.type, flakonNameOverride, sourceLabel);
+  return buildCalculationPayload_(row, input, flakonMap, input.type, flakonNameOverride, sourceLabel, bundleContext);
 }
 
 function getVerification(index, params) {
@@ -474,7 +748,8 @@ function getVerification(index, params) {
   var row = dataObj.rows[index];
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
-  return buildCalculationPayload_(row, params || {}, flakonMap);
+  var bundleContext = buildBundleContext_(params || {}, flakonMap, dataObj.rows || []);
+  return buildCalculationPayload_(row, params || {}, flakonMap, null, null, '', bundleContext);
 }
 
 function toNumber_(value, fallback) {

@@ -2529,4 +2529,423 @@ function flushNdsTaxUpdates() {
 window.addEventListener('resize', function() {
   applyExportStickyColumnsV3();
 });
+
+STATE.bundleData = STATE.bundleData || { rows: [], bundles: [], manualItems: [], stats: null };
+STATE.bundleStats = STATE.bundleStats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 };
+
+IMPORT_CFG_V2.bundles = {
+  title: 'Импорт комплектаций наборов',
+  endpoint: 'importBundleCompositions',
+  needsRates: false,
+  fields: [
+    { key: 'component', label: 'Компонент набора', required: true, hints: ['номенклатура', 'компонент', 'позиция'] },
+    { key: 'bundle', label: 'Набор', required: true, hints: ['вариант комплектации номенклатура', 'наименование набора', 'набор'] },
+    { key: 'specification', label: 'Спецификация', required: true, hints: ['вариант комплектации наименование варианта', 'вариант', 'спецификация'] },
+    { key: 'quantity', label: 'Количество', required: false, hints: ['количество', 'кол-во', 'qty'] }
+  ]
+};
+
+function toggleBundleGuide() {
+  var guide = document.getElementById('bundle-guide');
+  if (!guide) return;
+  guide.classList.toggle('hidden');
+}
+
+function ensureImportSettings(callback) {
+  if (STATE.importSettings) {
+    if (!STATE.importSettings.mappings) STATE.importSettings.mappings = {};
+    if (!Object.prototype.hasOwnProperty.call(STATE.importSettings.mappings, 'bundles')) {
+      STATE.importSettings.mappings.bundles = null;
+    }
+    if (callback) callback();
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(settings) {
+      STATE.importSettings = settings || { mappings: {}, rateDefaults: { nds: 0.22, tax: 0.065 } };
+      if (!STATE.importSettings.mappings) STATE.importSettings.mappings = {};
+      if (!Object.prototype.hasOwnProperty.call(STATE.importSettings.mappings, 'bundles')) {
+        STATE.importSettings.mappings.bundles = null;
+      }
+      if (callback) callback();
+    })
+    .withFailureHandler(function(err) {
+      STATE.importSettings = {
+        mappings: { nomenclature: null, cost: null, supplier: null, bundles: null },
+        rateDefaults: { nds: 0.22, tax: 0.065 }
+      };
+      setStatus('export-status', 'Не удалось загрузить настройки импорта: ' + err.message, 'error');
+      if (callback) callback();
+    })
+    .getImportSettings();
+}
+
+function showTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.nav-tab').forEach(function(el) { el.classList.remove('active'); });
+  document.getElementById('tab-' + tabId).classList.add('active');
+  var tabs = document.querySelectorAll('.nav-tab');
+  var names = ['params', 'export', 'flakons', 'bundles', 'cost', 'calc', 'verify'];
+  for (var i = 0; i < names.length; i++) {
+    if (names[i] === tabId && tabs[i]) tabs[i].classList.add('active');
+  }
+  if (tabId === 'params' && !STATE.params) loadParamsUI();
+  if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
+  if (tabId === 'bundles' && (!STATE.bundleData || !STATE.bundleData.rows || !STATE.bundleData.rows.length)) loadBundlesUI();
+  if (tabId === 'calc') ensureFlakonsState(function() {
+    populateCalcSelects();
+    syncCalcParamsFromParams(STATE.params || getParamsFromUI());
+  });
+  if (tabId === 'verify') populateVerifySelect();
+}
+
+function loadExportData() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(data) {
+      STATE.exportData = data;
+      google.script.run
+        .withSuccessHandler(function(bundleStats) {
+          hideLoading();
+          STATE.bundleStats = bundleStats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 };
+          renderExportTable(data);
+          renderExportStats(data);
+        })
+        .withFailureHandler(function() {
+          hideLoading();
+          STATE.bundleStats = { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 };
+          renderExportTable(data);
+          renderExportStats(data);
+        })
+        .getBundleStats();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка загрузки: ' + err.message, 'error');
+    })
+    .getData();
+}
+
+function renderExportStats(data) {
+  if (!data || !data.rows) return;
+
+  var total = data.rows.length;
+  var types = { raw: 0, finished: 0, sets: 0 };
+  var withCost = 0;
+  var withPrice = 0;
+
+  for (var i = 0; i < data.rows.length; i++) {
+    var row = data.rows[i];
+    var isSet = normalizeExportValueV3(row[11]);
+    var hasRaw = normalizeExportValueV3(row[7]) !== '';
+    if (isSet === 'Да') types.sets++;
+    else if (!hasRaw) types.finished++;
+    else types.raw++;
+    if (parseNumberV2(row[14]) !== null && parseNumberV2(row[14]) > 0) withCost++;
+    if (parseNumberV2(row[15]) !== null && parseNumberV2(row[15]) > 0) withPrice++;
+  }
+
+  var bundleStats = STATE.bundleStats || { loadedBundles: 0 };
+  document.getElementById('export-stats').innerHTML =
+    '<span class="stat-item"><span class="stat-dot" style="background:#1a73e8"></span>Всего: ' + total + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + types.raw + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Готовый товар: ' + types.finished + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + types.sets + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#6f5bd3"></span>Загружено комплектаций наборов: ' + (bundleStats.loadedBundles || 0) + '</span>' +
+    '<span class="stat-item">|</span>' +
+    '<span class="stat-item">Себес 1С: <b>' + withCost + '</b></span>' +
+    '<span class="stat-item">Цена пост.: <b>' + withPrice + '</b></span>';
+}
+
+function loadBundlesUI() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(data) {
+      hideLoading();
+      STATE.bundleData = data || { rows: [], bundles: [], manualItems: [], stats: null };
+      renderBundlesUI(STATE.bundleData);
+      STATE.bundleStats = (STATE.bundleData && STATE.bundleData.stats) || STATE.bundleStats;
+      if (STATE.exportData) renderExportStats(STATE.exportData);
+      setStatus('bundles-status', 'Загружено строк комплектаций: ' + ((STATE.bundleData.rows || []).length), 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('bundles-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .getBundleData();
+}
+
+function renderBundlesUI(data) {
+  data = data || { rows: [], bundles: [], manualItems: [], stats: null };
+  renderBundleSpecSelectors(data.bundles || []);
+  renderBundleManualRows(data.manualItems || []);
+  renderBundleRows(data.rows || []);
+  renderBundleStats(data.stats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 });
+}
+
+function renderBundleStats(stats) {
+  var host = document.getElementById('bundles-stats');
+  if (!host) return;
+  host.innerHTML =
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборов в импорте: ' + (stats.totalSets || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#6f5bd3"></span>Загружено комплектаций: ' + (stats.loadedBundles || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#1f6b57"></span>Строк состава: ' + (stats.compositionRows || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#b7791f"></span>Без найденной себестоимости: ' + (stats.unresolvedComponents || 0) + '</span>';
+}
+
+function renderBundleSpecSelectors(bundles) {
+  var host = document.getElementById('bundle-specs');
+  if (!host) return;
+  host.innerHTML = '';
+
+  if (!bundles.length) {
+    host.innerHTML = '<div class="hint">Пока нет загруженных комплектов.</div>';
+    return;
+  }
+
+  for (var i = 0; i < bundles.length; i++) {
+    var item = bundles[i];
+    var wrap = document.createElement('div');
+    wrap.className = 'bundle-spec-item';
+
+    var title = document.createElement('label');
+    title.textContent = item.bundle;
+    wrap.appendChild(title);
+
+    var select = document.createElement('select');
+    select.className = 'bundle-spec-select';
+    select.setAttribute('data-bundle', item.bundle);
+    for (var j = 0; j < item.specs.length; j++) {
+      var opt = document.createElement('option');
+      opt.value = item.specs[j];
+      opt.textContent = item.specs[j];
+      if (item.activeSpec === item.specs[j]) opt.selected = true;
+      select.appendChild(opt);
+    }
+    wrap.appendChild(select);
+    host.appendChild(wrap);
+  }
+}
+
+function renderBundleManualRows(items) {
+  var tbody = document.getElementById('bundle-manual-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!items.length) {
+    var trEmpty = document.createElement('tr');
+    trEmpty.innerHTML = '<td colspan="3" class="muted-cell">Все компоненты уже имеют найденную себестоимость.</td>';
+    tbody.appendChild(trEmpty);
+    return;
+  }
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + esc(item.component) + '</td>' +
+      '<td class="num">' + esc(item.usageCount || 0) + '</td>' +
+      '<td><input type="number" step="0.01" class="rate-input" data-component="' + esc(item.component) + '" value="' + (item.manualCost === '' ? '' : item.manualCost) + '"></td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function renderBundleRows(rows) {
+  var tbody = document.getElementById('bundles-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!rows.length) {
+    var trEmpty = document.createElement('tr');
+    trEmpty.innerHTML = '<td colspan="10" class="muted-cell">Комплектации наборов ещё не загружены.</td>';
+    tbody.appendChild(trEmpty);
+    return;
+  }
+
+  for (var i = 0; i < rows.length; i++) {
+    var item = rows[i];
+    var tr = document.createElement('tr');
+    if (item.active) tr.classList.add('bundle-active-row');
+    tr.innerHTML =
+      '<td>' + esc(item.component) + '</td>' +
+      '<td>' + esc(item.bundle) + '</td>' +
+      '<td>' + esc(item.specification) + '</td>' +
+      '<td class="num">' + fmt(item.quantity) + '</td>' +
+      '<td>' + (item.active ? '<span class="badge badge-flakon">Да</span>' : '—') + '</td>' +
+      '<td class="num">' + fmt(item.cost1C) + '</td>' +
+      '<td class="num' + (parseNumberV2(item.calcCost) === 0 ? ' zero-value' : '') + '">' + fmt(item.calcCost) + '</td>' +
+      '<td class="num' + (item.manualCost === '' ? '' : ' bundle-manual-cost') + '">' + (item.manualCost === '' ? '—' : fmt(item.manualCost)) + '</td>' +
+      '<td class="num col-total">' + fmt(item.usedCost) + '</td>' +
+      '<td>' + esc(item.source || '') + '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function collectBundlePayload() {
+  var activeSpecs = {};
+  var manualCosts = {};
+  var specSelects = document.querySelectorAll('#bundle-specs select[data-bundle]');
+  var manualInputs = document.querySelectorAll('#bundle-manual-tbody input[data-component]');
+
+  for (var i = 0; i < specSelects.length; i++) {
+    activeSpecs[specSelects[i].getAttribute('data-bundle')] = specSelects[i].value;
+  }
+  for (var j = 0; j < manualInputs.length; j++) {
+    var raw = String(manualInputs[j].value || '').trim();
+    manualCosts[manualInputs[j].getAttribute('data-component')] = raw === '' ? '' : parseFloat(raw);
+  }
+
+  return {
+    activeSpecs: activeSpecs,
+    manualCosts: manualCosts
+  };
+}
+
+function saveBundleDataUI() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(data) {
+      hideLoading();
+      STATE.bundleData = data || STATE.bundleData;
+      renderBundlesUI(STATE.bundleData);
+      STATE.bundleStats = (STATE.bundleData && STATE.bundleData.stats) || STATE.bundleStats;
+      if (STATE.exportData) renderExportStats(STATE.exportData);
+      setStatus('bundles-status', (data && data.message) || 'Наборы сохранены.', 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('bundles-status', 'Ошибка: ' + err.message, 'error');
+    })
+    .saveBundleData(collectBundlePayload());
+}
+
+function confirmImport() {
+  if (!STATE.importCtx) return;
+  var cfg = IMPORT_CFG_V2[STATE.importCtx.type];
+  var mapping = {};
+  for (var i = 0; i < cfg.fields.length; i++) {
+    var key = cfg.fields[i].key;
+    var sel = document.getElementById('map-' + key);
+    mapping[key] = sel ? parseInt(sel.value, 10) : -1;
+  }
+
+  for (var req = 0; req < cfg.fields.length; req++) {
+    if (cfg.fields[req].required && !isValidIndexV2(mapping[cfg.fields[req].key], STATE.importCtx.headers.length)) {
+      alert('Не заполнено обязательное поле: ' + cfg.fields[req].label);
+      return;
+    }
+  }
+  if ((STATE.importCtx.type === 'cost' || STATE.importCtx.type === 'supplier') &&
+      !isValidIndexV2(mapping.name, STATE.importCtx.headers.length) &&
+      !isValidIndexV2(mapping.article, STATE.importCtx.headers.length)) {
+    alert('Для сопоставления укажите колонку Номенклатура или Артикул.');
+    return;
+  }
+
+  var payload;
+  if (STATE.importCtx.type === 'nomenclature') {
+    var rows = [];
+    for (var r = 0; r < STATE.importCtx.dataRows.length; r++) {
+      var src = STATE.importCtx.dataRows[r];
+      var item = {};
+      for (var f = 0; f < cfg.fields.length; f++) {
+        var field = cfg.fields[f];
+        var idx = mapping[field.key];
+        item[field.key] = isValidIndexV2(idx, STATE.importCtx.headers.length) ? String(src[idx] || '').trim() : '';
+      }
+      if (!item.name) continue;
+      rows.push(item);
+    }
+    if (!rows.length) {
+      alert('После фильтрации не осталось строк с номенклатурой.');
+      return;
+    }
+    payload = {
+      rows: rows,
+      defaults: {
+        nds: toNumberSafe(document.getElementById('import-default-nds').value, 0.22),
+        tax: toNumberSafe(document.getElementById('import-default-tax').value, 0.065)
+      },
+      mapping: buildMappingPayloadV2(mapping)
+    };
+  } else if (STATE.importCtx.type === 'bundles') {
+    var bundleRows = [];
+    for (var b = 0; b < STATE.importCtx.dataRows.length; b++) {
+      var bundleSrc = STATE.importCtx.dataRows[b];
+      var component = isValidIndexV2(mapping.component, STATE.importCtx.headers.length) ? String(bundleSrc[mapping.component] || '').trim() : '';
+      var bundle = isValidIndexV2(mapping.bundle, STATE.importCtx.headers.length) ? String(bundleSrc[mapping.bundle] || '').trim() : '';
+      var specification = isValidIndexV2(mapping.specification, STATE.importCtx.headers.length) ? String(bundleSrc[mapping.specification] || '').trim() : '';
+      var quantity = isValidIndexV2(mapping.quantity, STATE.importCtx.headers.length) ? parseNumberV2(bundleSrc[mapping.quantity]) : null;
+      if (!component || !bundle || !specification) continue;
+      bundleRows.push({
+        component: component,
+        bundle: bundle,
+        specification: specification,
+        quantity: quantity === null ? 1 : quantity
+      });
+    }
+    if (!bundleRows.length) {
+      alert('Не найдено валидных строк комплектаций наборов.');
+      return;
+    }
+    payload = {
+      rows: bundleRows,
+      mapping: buildMappingPayloadV2(mapping)
+    };
+  } else {
+    var mappedRows = [];
+    for (var iRow = 0; iRow < STATE.importCtx.dataRows.length; iRow++) {
+      var srcRow = STATE.importCtx.dataRows[iRow];
+      var name = isValidIndexV2(mapping.name, STATE.importCtx.headers.length) ? String(srcRow[mapping.name] || '').trim() : '';
+      var article = isValidIndexV2(mapping.article, STATE.importCtx.headers.length) ? String(srcRow[mapping.article] || '').trim() : '';
+      var value = isValidIndexV2(mapping.value, STATE.importCtx.headers.length) ? parseNumberV2(srcRow[mapping.value]) : null;
+      if (!name && !article) continue;
+      if (value === null) continue;
+      mappedRows.push({ name: name, article: article, value: value });
+    }
+    if (!mappedRows.length) {
+      alert('Не найдено валидных строк для импорта.');
+      return;
+    }
+    payload = {
+      rows: mappedRows,
+      mapping: buildMappingPayloadV2(mapping)
+    };
+  }
+
+  closeImportModal();
+  showLoading();
+  setStatus('export-status', 'Импортирую данные...', 'info');
+
+  var runner = google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('export-status', (res && res.message) || 'Импорт завершился с ошибкой.', 'error');
+        return;
+      }
+      STATE.importSettings = STATE.importSettings || { mappings: {}, rateDefaults: { nds: 0.22, tax: 0.065 } };
+      STATE.importSettings.mappings[STATE.importCtx.type] = payload.mapping;
+      if (STATE.importCtx.type === 'nomenclature') {
+        STATE.importSettings.rateDefaults = { nds: payload.defaults.nds, tax: payload.defaults.tax };
+      }
+      var details = '';
+      if (res.matchedByName !== undefined || res.matchedByArticle !== undefined) {
+        details = ' (по наименованию: ' + (res.matchedByName || 0) + ', по артикулу: ' + (res.matchedByArticle || 0) + ')';
+      }
+      setStatus('export-status', res.message + details, 'success');
+      loadExportData();
+      if (STATE.importCtx.type === 'bundles') loadBundlesUI();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('export-status', 'Ошибка импорта: ' + err.message, 'error');
+    });
+
+  if (cfg.endpoint === 'importBaseNomenclature') runner.importBaseNomenclature(payload);
+  if (cfg.endpoint === 'importCurrentCost') runner.importCurrentCost(payload);
+  if (cfg.endpoint === 'importSupplierPriceData') runner.importSupplierPriceData(payload);
+  if (cfg.endpoint === 'importBundleCompositions') runner.importBundleCompositions(payload);
+}
 </script>
