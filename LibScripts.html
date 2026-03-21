@@ -1,0 +1,128 @@
+<!-- CDN: Popper.js (required by Tippy) -->
+<script src="https://unpkg.com/@popperjs/core@2"></script>
+
+<!-- CDN: Tippy.js -->
+<script src="https://unpkg.com/tippy.js@6"></script>
+
+<!-- CDN: Toastify -->
+<script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
+
+<!-- CDN: SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<!-- CDN: Tabulator -->
+<script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
+
+<!-- CDN: Lucide Icons -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+<script>
+/* ── Tabulator helper ── */
+function createTable(containerId, columns, data, opts) {
+  var el = document.getElementById(containerId);
+  if (!el) { console.error('createTable: element #' + containerId + ' not found'); return null; }
+  el.innerHTML = '';
+  var defaults = {
+    data: data || [],
+    columns: columns,
+    layout: 'fitDataFill',
+    height: '68vh',
+    placeholder: 'Нет данных',
+    headerSortTristate: true,
+    movableColumns: false,
+    reactiveData: false,
+    renderHorizontal: 'virtual',
+    columnDefaults: {
+      headerSort: true,
+      resizable: true,
+      headerTooltip: true
+    }
+  };
+  var config = Object.assign({}, defaults, opts || {});
+  config.columns = columns;
+  if (data) config.data = data;
+  return new Tabulator('#' + containerId, config);
+}
+
+/* ── Toast helpers ── */
+function showToast(message, type) {
+  var bgMap = {
+    success: 'linear-gradient(135deg, #22c55e, #16a34a)',
+    error: 'linear-gradient(135deg, #ef4444, #dc2626)',
+    warning: 'linear-gradient(135deg, #f59e0b, #d97706)',
+    info: 'linear-gradient(135deg, #3b82f6, #2563eb)'
+  };
+  Toastify({
+    text: message,
+    duration: type === 'error' ? 5000 : 3000,
+    gravity: 'top',
+    position: 'right',
+    style: {
+      background: bgMap[type] || bgMap.info
+    },
+    stopOnFocus: true
+  }).showToast();
+}
+
+/* ── SweetAlert2 helpers ── */
+function showAlert(title, text, icon) {
+  return Swal.fire({
+    title: title,
+    text: text,
+    icon: icon || 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
+function showConfirm(title, text) {
+  return Swal.fire({
+    title: title,
+    text: text,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'Да',
+    cancelButtonText: 'Отмена'
+  });
+}
+
+/* ── Lucide init helper ── */
+function initIcons() {
+  if (typeof lucide !== 'undefined' && lucide.createIcons) {
+    lucide.createIcons();
+  }
+}
+
+/* ── Tippy helper ── */
+function initTooltips(selector) {
+  if (typeof tippy !== 'undefined') {
+    tippy(selector || '[data-tippy-content]', {
+      theme: 'app',
+      placement: 'top',
+      animation: 'shift-away',
+      delay: [200, 0]
+    });
+  }
+}
+
+/* ── Number formatting for Tabulator cells ── */
+function fmtNumber(cell, params, onRendered) {
+  var val = cell.getValue();
+  if (val === null || val === undefined || val === '') return '';
+  var n = parseFloat(val);
+  if (isNaN(n)) return val;
+  var dec = (params && params.decimals !== undefined) ? params.decimals : 2;
+  return n.toFixed(dec).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+/* ── Badge formatter for item type column ── */
+function fmtTypeBadge(cell) {
+  var val = cell.getValue();
+  if (!val) return '';
+  var cls = '';
+  if (val === 'Сырьё') cls = 'badge-raw';
+  else if (val === 'Готовый товар') cls = 'badge-finished';
+  else if (val === 'Флакон') cls = 'badge-flakon';
+  else if (val === 'Наборы') cls = 'badge-set';
+  return '<span class="badge ' + cls + '">' + val + '</span>';
+}
+</script>

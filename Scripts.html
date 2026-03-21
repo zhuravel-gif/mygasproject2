@@ -9,7 +9,8 @@ var STATE = {
   params: null,        // текущие параметры
   xlsxReady: false,    // SheetJS загружен
   importType: null,    // 'nomenclature' | 'cost' | 'price'
-  importFileData: null // { headers, rows } из файла
+  importFileData: null, // { headers, rows } из файла
+  tables: {}           // Tabulator instances
 };
 
 // НДС/Пошлина: очередь изменений для batch-сохранения
@@ -46,6 +47,9 @@ function hideLoading() { document.getElementById('loading').classList.remove('ac
 function setStatus(id, msg, type) {
   var el = document.getElementById(id);
   if (el) { el.textContent = msg; el.className = 'status ' + (type || ''); }
+  if (typeof showToast === 'function' && (type === 'success' || type === 'error')) {
+    showToast(msg, type);
+  }
 }
 
 function toggleImportGuide() {
@@ -308,7 +312,7 @@ function confirmImport() {
       mapping[key] = sel ? parseInt(sel.value) : -1;
     }
     if (mapping.NAME < 0) {
-      alert('Необходимо выбрать столбец с наименованием номенклатуры.');
+      showAlert('Внимание', 'Необходимо выбрать столбец с наименованием номенклатуры.');
       return;
     }
 
@@ -334,7 +338,7 @@ function confirmImport() {
     }
 
     if (exportRows.length < 2) {
-      alert('После фильтрации не осталось данных для импорта.');
+      showAlert('Внимание', 'После фильтрации не осталось данных для импорта.');
       return;
     }
 
@@ -364,8 +368,8 @@ function confirmImport() {
     var nameIdx  = parseInt(nameSel.value);
     var valueIdx = parseInt(valueSel.value);
 
-    if (nameIdx < 0) { alert('Укажите столбец с наименованием.'); return; }
-    if (valueIdx < 0) { alert('Укажите столбец со значением.'); return; }
+    if (nameIdx < 0) { showAlert('Ошибка', 'Укажите столбец с наименованием.'); return; }
+    if (valueIdx < 0) { showAlert('Ошибка', 'Укажите столбец со значением.'); return; }
 
     var mappedData = [];
     for (var i = 0; i < fd.rows.length; i++) {
@@ -377,7 +381,7 @@ function confirmImport() {
     }
 
     if (mappedData.length === 0) {
-      alert('Не найдено строк с данными (наименование + числовое значение > 0).');
+      showAlert('Внимание', 'Не найдено строк с данными (наименование + числовое значение > 0).');
       return;
     }
 
@@ -455,27 +459,27 @@ function applyRatesToAllUI() {
 
   var nds = parseFloat(ndsInput.value);
   var tax = parseFloat(taxInput.value);
-  if (isNaN(nds) || isNaN(tax)) { alert('Введите корректные значения НДС и Пошлины.'); return; }
+  if (isNaN(nds) || isNaN(tax)) { showAlert('Ошибка', 'Введите корректные значения НДС и Пошлины.'); return; }
 
-  var confirmed = window.confirm(
-    'Применить НДС=' + (nds * 100).toFixed(1) + '% и Пошлину=' + (tax * 100).toFixed(1) + '%\nко ВСЕМ строкам таблицы?'
-  );
-  if (!confirmed) return;
-
-  showLoading();
-  google.script.run
-    .withSuccessHandler(function(res) {
-      hideLoading();
-      if (res && res.success) {
-        setStatus('export-status', '✓ НДС/Пошлина применены к ' + res.count + ' строкам', 'success');
-        loadExportData();
-      }
-    })
-    .withFailureHandler(function(err) {
-      hideLoading();
-      setStatus('export-status', 'Ошибка: ' + err.message, 'error');
-    })
-    .updateAllNdsTax(nds, tax);
+  showConfirm('Подтверждение',
+    'Применить НДС=' + (nds * 100).toFixed(1) + '% и Пошлину=' + (tax * 100).toFixed(1) + '% ко ВСЕМ строкам таблицы?'
+  ).then(function(result) {
+    if (!result.isConfirmed) return;
+    showLoading();
+    google.script.run
+      .withSuccessHandler(function(res) {
+        hideLoading();
+        if (res && res.success) {
+          setStatus('export-status', '✓ НДС/Пошлина применены к ' + res.count + ' строкам', 'success');
+          loadExportData();
+        }
+      })
+      .withFailureHandler(function(err) {
+        hideLoading();
+        setStatus('export-status', 'Ошибка: ' + err.message, 'error');
+      })
+      .updateAllNdsTax(nds, tax);
+  });
 }
 
 function saveRateEditsUI() {
@@ -507,61 +511,118 @@ var EXPORT_TAX_COL = 17;
 
 function renderExportTable(data) {
   if (!data || !data.headers) return;
-  var thead = document.getElementById('export-thead');
-  var tbody = document.getElementById('export-tbody');
-  thead.innerHTML = '';
-  tbody.innerHTML = '';
 
-  // Заголовки — сокращённые для длинных строк
-  for (var h = 0; h < data.headers.length; h++) {
-    var th = document.createElement('th');
-    var full = String(data.headers[h] || '');
-    th.textContent = full.length > 22 ? full.substring(0, 20) + '…' : full;
-    th.title = full;
-    if (h === EXPORT_NDS_COL || h === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
-    thead.appendChild(th);
+  if (typeof Tabulator === 'undefined') {
+    // Vanilla fallback — render simple table
+    var container = document.getElementById('export-table-container');
+    container.innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr id="export-thead"></tr></thead><tbody id="export-tbody"></tbody></table></div>';
+    var thead = document.getElementById('export-thead');
+    for (var h = 0; h < data.headers.length; h++) {
+      var th = document.createElement('th');
+      var full = String(data.headers[h] || '');
+      th.textContent = full.length > 22 ? full.substring(0, 20) + '…' : full;
+      th.title = full;
+      thead.appendChild(th);
+    }
+    renderExportRowsVanilla(data.rows);
+    return;
   }
 
-  renderExportRows(data.rows);
+  // Convert array-of-arrays to array-of-objects for Tabulator
+  var rows = data.rows || [];
+  var headers = data.headers || [];
+  var tableData = [];
+  for (var i = 0; i < rows.length; i++) {
+    var obj = { _rowIndex: i };
+    for (var j = 0; j < headers.length; j++) {
+      obj['col' + j] = rows[i][j];
+    }
+    tableData.push(obj);
+  }
+
+  // Build columns from headers
+  var columns = [];
+  for (var c = 0; c < headers.length; c++) {
+    var colDef = {
+      title: String(headers[c] || ''),
+      field: 'col' + c,
+      headerSort: true,
+      resizable: true,
+      headerTooltip: true
+    };
+
+    if (c === 0) {
+      // Name column — frozen, with search filter
+      colDef.frozen = true;
+      colDef.minWidth = 200;
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (c === EXPORT_NDS_COL || c === EXPORT_TAX_COL) {
+      // Editable NDS/Tax columns
+      colDef.editor = 'number';
+      colDef.editorParams = { step: 0.001, min: 0, max: 1 };
+      colDef.hozAlign = 'right';
+      colDef.minWidth = 90;
+      colDef.cssClass = 'calc-col';
+      colDef.formatter = function(cell) {
+        var val = cell.getValue();
+        if (val === null || val === undefined || val === '') return '';
+        return parseFloat(val).toFixed(3);
+      };
+    } else {
+      // Auto-detect numeric columns
+      colDef.minWidth = 80;
+      if (c > 0) {
+        colDef.formatter = function(cell) {
+          var val = cell.getValue();
+          if (val === null || val === undefined || val === '') return '';
+          var num = parseFloat(val);
+          if (isNaN(num)) return String(val);
+          return num % 1 === 0 ? String(num) : num.toFixed(2);
+        };
+        colDef.hozAlign = 'right';
+      }
+    }
+
+    columns.push(colDef);
+  }
+
+  if (STATE.tables.export) {
+    STATE.tables.export.replaceData(tableData);
+    return;
+  }
+
+  STATE.tables.export = createTable('export-table-container', columns, tableData, {
+    height: '68vh',
+    layout: 'fitDataFill',
+    placeholder: 'Загрузите данные для отображения',
+    cellEdited: function(cell) {
+      var field = cell.getColumn().getField();
+      var rowData = cell.getRow().getData();
+      var rowIndex = rowData._rowIndex;
+      var fieldName = (field === 'col' + EXPORT_NDS_COL) ? 'nds' : 'tax';
+      onNdsTaxChange(rowIndex, fieldName, cell.getValue());
+    }
+  });
 }
 
-function renderExportRows(rows) {
+function renderExportRowsVanilla(rows) {
   var tbody = document.getElementById('export-tbody');
+  if (!tbody) return;
   tbody.innerHTML = '';
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
     var tr = document.createElement('tr');
     tr.setAttribute('data-name', (String(row[0] || '') + ' ' + String(row[1] || '')).toLowerCase());
-
     for (var j = 0; j < row.length; j++) {
       var td = document.createElement('td');
-
-      if (j === EXPORT_NDS_COL || j === EXPORT_TAX_COL) {
-        // Редактируемая ячейка
-        var field = j === EXPORT_NDS_COL ? 'nds' : 'tax';
-        var inp = document.createElement('input');
-        inp.type = 'number';
-        inp.className = 'nds-tax-input';
-        inp.step = '0.001';
-        inp.value = parseFloat(row[j]) || 0;
-        inp.setAttribute('data-row', i);
-        inp.setAttribute('data-field', field);
-        td.style.background = '#f1f8e9';
-        td.style.padding = '2px 6px';
-        // Захватываем переменные через замыкание
-        (function(el, ri, fi) {
-          el.addEventListener('change', function() { onNdsTaxChange(ri, fi, this.value); });
-        })(inp, i, field);
-        td.appendChild(inp);
+      var val = row[j];
+      if (val !== null && val !== undefined && val !== '' && !isNaN(parseFloat(val)) && j > 0) {
+        td.className = 'num';
+        var num = parseFloat(val);
+        td.textContent = num % 1 === 0 ? String(num) : num.toFixed(2);
       } else {
-        var val = row[j];
-        if (val !== null && val !== undefined && val !== '' && !isNaN(parseFloat(val)) && j > 0) {
-          td.className = 'num';
-          var num = parseFloat(val);
-          td.textContent = num % 1 === 0 ? String(num) : num.toFixed(2);
-        } else {
-          td.textContent = val !== null && val !== undefined ? String(val) : '';
-        }
+        td.textContent = val !== null && val !== undefined ? String(val) : '';
       }
       tr.appendChild(td);
     }
@@ -570,12 +631,8 @@ function renderExportRows(rows) {
 }
 
 function filterExportTable() {
-  var query = document.getElementById('export-search').value.toLowerCase();
-  var rows = document.querySelectorAll('#export-tbody tr');
-  for (var i = 0; i < rows.length; i++) {
-    var name = rows[i].getAttribute('data-name') || '';
-    rows[i].style.display = (!query || name.indexOf(query) >= 0) ? '' : 'none';
-  }
+  // Tabulator handles filtering via built-in headerFilter
+  if (STATE.tables.export) return;
 }
 
 function renderExportStats(data) {
@@ -782,28 +839,52 @@ function loadFlakonsUI() {
 }
 
 function renderFlakonsTable(flakons) {
-  var tbody = document.getElementById('flakons-tbody');
-  tbody.innerHTML = '';
-  for (var i = 0; i < flakons.length; i++) {
-    var f = flakons[i];
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td>' + esc(f.name) + '</td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="volume" step="1" value="' + (f.volume||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="weight" step="0.001" value="' + (f.weight||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="supplierPrice" step="0.01" value="' + (f.supplierPrice||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="nds" step="0.001" value="' + (f.nds||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="tax" step="0.001" value="' + (f.tax||0) + '"></td>' +
-      '<td><input type="number" data-idx="' + i + '" data-field="label" step="0.01" value="' + (f.label||0) + '"></td>' +
-      '<td class="num calc-col-cell">' + fmt(f.rawFl) + '</td>' +
-      '<td class="num calc-col-cell">' + fmt(f.deliveryFl) + '</td>' +
-      '<td class="num calc-col-cell">' + fmt(f.taxDutyFl) + '</td>' +
-      '<td class="num calc-col-cell"><b>' + fmt(f.totalFl) + '</b></td>';
-    tbody.appendChild(tr);
+  if (typeof Tabulator === 'undefined') {
+    // Vanilla fallback
+    var container = document.getElementById('flakons-table-container');
+    container.innerHTML = '<div class="table-wrap"><table class="data-table editable"><thead><tr><th>Флакон</th><th>Объём</th><th>Вес</th><th>Цена поставщика</th><th>НДС</th><th>Пошлина</th><th>Этикетка</th><th class="calc-col-head">Цена фл. руб.</th><th class="calc-col-head">Доставка руб.</th><th class="calc-col-head">НДС+пошлина</th><th class="calc-col-head">Себес. фл.</th></tr></thead><tbody id="flakons-tbody"></tbody></table></div>';
+    var tbody = document.getElementById('flakons-tbody');
+    for (var i = 0; i < flakons.length; i++) {
+      var f = flakons[i];
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + esc(f.name) + '</td><td><input type="number" step="1" value="' + (f.volume||0) + '"></td><td><input type="number" step="0.001" value="' + (f.weight||0) + '"></td><td><input type="number" step="0.01" value="' + (f.supplierPrice||0) + '"></td><td><input type="number" step="0.001" value="' + (f.nds||0) + '"></td><td><input type="number" step="0.001" value="' + (f.tax||0) + '"></td><td><input type="number" step="0.01" value="' + (f.label||0) + '"></td><td class="num calc-col-cell">' + fmt(f.rawFl) + '</td><td class="num calc-col-cell">' + fmt(f.deliveryFl) + '</td><td class="num calc-col-cell">' + fmt(f.taxDutyFl) + '</td><td class="num calc-col-cell"><b>' + fmt(f.totalFl) + '</b></td>';
+      tbody.appendChild(tr);
+    }
+    return;
   }
+
+  var columns = [
+    { title: 'Флакон', field: 'name', frozen: true, minWidth: 180, headerFilter: 'input', headerFilterPlaceholder: 'Поиск...' },
+    { title: 'Объём', field: 'volume', editor: 'number', editorParams: { step: 1 }, hozAlign: 'right', minWidth: 80 },
+    { title: 'Вес', field: 'weight', editor: 'number', editorParams: { step: 0.001 }, hozAlign: 'right', minWidth: 80, formatter: fmtNumber, formatterParams: { decimals: 3 } },
+    { title: 'Цена пост.', field: 'supplierPrice', editor: 'number', editorParams: { step: 0.01 }, hozAlign: 'right', minWidth: 90, formatter: fmtNumber, formatterParams: { decimals: 2 } },
+    { title: 'НДС', field: 'nds', editor: 'number', editorParams: { step: 0.001, min: 0, max: 1 }, hozAlign: 'right', minWidth: 80, formatter: fmtNumber, formatterParams: { decimals: 3 } },
+    { title: 'Пошлина', field: 'tax', editor: 'number', editorParams: { step: 0.001, min: 0, max: 1 }, hozAlign: 'right', minWidth: 80, formatter: fmtNumber, formatterParams: { decimals: 3 } },
+    { title: 'Этикетка', field: 'label', editor: 'number', editorParams: { step: 0.01 }, hozAlign: 'right', minWidth: 80, formatter: fmtNumber, formatterParams: { decimals: 2 } },
+    { title: 'Цена фл. руб.', field: 'rawFl', hozAlign: 'right', cssClass: 'calc-col', formatter: fmtNumber, formatterParams: { decimals: 2 }, minWidth: 100 },
+    { title: 'Доставка руб.', field: 'deliveryFl', hozAlign: 'right', cssClass: 'calc-col', formatter: fmtNumber, formatterParams: { decimals: 2 }, minWidth: 100 },
+    { title: 'НДС+пошлина', field: 'taxDutyFl', hozAlign: 'right', cssClass: 'calc-col', formatter: fmtNumber, formatterParams: { decimals: 2 }, minWidth: 100 },
+    { title: 'Себес. фл.', field: 'totalFl', hozAlign: 'right', cssClass: 'col-total', formatter: fmtNumber, formatterParams: { decimals: 2 }, minWidth: 110 }
+  ];
+
+  if (STATE.tables.flakons) {
+    STATE.tables.flakons.replaceData(flakons);
+    return;
+  }
+
+  STATE.tables.flakons = createTable('flakons-table-container', columns, flakons, {
+    height: '60vh',
+    layout: 'fitDataFill',
+    placeholder: 'Нажмите "Обновить" для загрузки флаконов'
+  });
 }
 
 function collectFlakonData() {
+  // Read from Tabulator if available
+  if (STATE.tables.flakons) {
+    return STATE.tables.flakons.getData();
+  }
+  // Vanilla fallback
   var flakons = [];
   var rows = document.querySelectorAll('#flakons-tbody tr');
   for (var i = 0; i < rows.length; i++) {
@@ -1234,12 +1315,117 @@ function renderCostRows(results) {
 
 function renderCostTable(results) {
   if (results) STATE.calcResults = results;
-  renderCostHeaders();
-  renderCostSlicers();
-  renderCostRows(getFilteredCostResults());
+
+  if (typeof Tabulator === 'undefined') {
+    // Vanilla fallback: use old render functions
+    renderCostHeaders();
+    renderCostSlicers();
+    renderCostRows(getFilteredCostResults());
+    return;
+  }
+
+  var data = STATE.calcResults || [];
+  var columns = [];
+
+  for (var i = 0; i < COST_COLUMNS.length; i++) {
+    var col = COST_COLUMNS[i];
+    var colDef = {
+      title: col.label,
+      field: col.key,
+      headerSort: true,
+      headerFilter: col.filterable ? (col.numeric ? 'number' : 'list') : false,
+      resizable: true
+    };
+
+    if (col.key === 'name') {
+      colDef.frozen = true;
+      colDef.minWidth = 200;
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (col.key === 'flakonName' || col.key === 'category') {
+      colDef.minWidth = 120;
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (col.key === 'type') {
+      colDef.formatter = fmtTypeBadge;
+      colDef.headerFilter = 'list';
+      colDef.headerFilterParams = { values: { '': 'Все', 'Сырьё': 'Сырьё', 'Готовый товар': 'Готовый товар', 'Флакон': 'Флакон', 'Наборы': 'Наборы' } };
+      colDef.minWidth = 120;
+    } else if (col.key === 'total') {
+      colDef.formatter = fmtNumber;
+      colDef.formatterParams = { decimals: 2 };
+      colDef.hozAlign = 'right';
+      colDef.cssClass = 'col-total';
+      colDef.minWidth = 100;
+      colDef.headerFilter = false;
+    } else if (col.key === 'diff') {
+      colDef.hozAlign = 'right';
+      colDef.headerFilter = false;
+      colDef.minWidth = 90;
+      colDef.formatter = function(cell) {
+        var val = cell.getValue();
+        if (val === null || val === undefined) return '';
+        var cls = val > 0 ? 'diff-pos' : (val < 0 ? 'diff-neg' : 'diff-zero');
+        return '<span class="' + cls + '">' + (val > 0 ? '+' : '') + fmt(val) + '</span>';
+      };
+    } else if (col.key === 'diffPct') {
+      colDef.hozAlign = 'right';
+      colDef.headerFilter = false;
+      colDef.minWidth = 70;
+      colDef.formatter = function(cell) {
+        var row = cell.getRow().getData();
+        if (!row.cost1C || row.cost1C === 0) return '—';
+        var val = row.diffPct;
+        var cls = row.diff > 0 ? 'diff-pos' : (row.diff < 0 ? 'diff-neg' : 'diff-zero');
+        return '<span class="' + cls + '">' + (val * 100).toFixed(1) + '%</span>';
+      };
+    } else if (col.numeric) {
+      colDef.formatter = fmtNumber;
+      colDef.formatterParams = { decimals: 2 };
+      colDef.hozAlign = 'right';
+      colDef.minWidth = 85;
+      colDef.headerFilter = false;
+      colDef.cellClick = function(e, cell) {
+        var val = cell.getValue();
+        if (val !== null && val !== undefined && parseFloat(val) === 0) {
+          cell.getElement().classList.add('zero-val');
+        }
+      };
+    }
+
+    columns.push(colDef);
+  }
+
+  if (STATE.tables.cost) {
+    STATE.tables.cost.replaceData(data);
+    return;
+  }
+
+  STATE.tables.cost = createTable('cost-table-container', columns, data, {
+    height: '68vh',
+    layout: 'fitDataFill',
+    frozenRows: 0,
+    placeholder: 'Выполните расчёт для отображения результатов',
+    rowFormatter: function(row) {
+      var d = row.getData();
+      var cells = row.getCells();
+      for (var i = 0; i < cells.length; i++) {
+        var field = cells[i].getColumn().getField();
+        if (field !== 'name' && field !== 'flakonName' && field !== 'category' && field !== 'type') {
+          var val = cells[i].getValue();
+          if (val !== null && val !== undefined && parseFloat(val) === 0 && field !== 'diff' && field !== 'diffPct') {
+            cells[i].getElement().classList.add('zero-val');
+          }
+        }
+      }
+    }
+  });
 }
 
 function filterCostTable() {
+  // Tabulator handles filtering via built-in headerFilter
+  if (STATE.tables.cost) return;
+  // Vanilla fallback
   renderCostRows(getFilteredCostResults());
 }
 
@@ -1374,6 +1560,10 @@ function renderCalcResult(r) {
   var result = payload.result || {};
   var el = document.getElementById('calc-result');
   var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
+  if (el) {
+    el.style.background = result.diff > 0 ? 'linear-gradient(135deg, #fef2f2, #fff)' :
+                           result.diff < 0 ? 'linear-gradient(135deg, #f0fdf4, #fff)' : '';
+  }
   var html =
     '<table>' +
     '<tr><td>Тип</td><td><b>' + esc(result.type || payload.type || '') + '</b></td></tr>' +
@@ -1492,6 +1682,21 @@ function esc(s) {
 window.addEventListener('load', function() {
   loadExportData();
   loadParamsUI();
+  initIcons();
+  /* Convert param-help divs into Tippy tooltips on their labels */
+  if (typeof tippy !== 'undefined') {
+    var helps = document.querySelectorAll('.param-help');
+    for (var i = 0; i < helps.length; i++) {
+      var text = helps[i].textContent.trim();
+      var label = helps[i].parentElement.querySelector('label');
+      if (label && text) {
+        label.setAttribute('data-tippy-content', text);
+        label.style.cursor = 'help';
+      }
+      helps[i].style.display = 'none';
+    }
+    initTooltips('label[data-tippy-content]');
+  }
 });
 
 // ============================================================
@@ -1892,14 +2097,14 @@ function confirmImport() {
 
   for (var req = 0; req < cfg.fields.length; req++) {
     if (cfg.fields[req].required && !isValidIndexV2(mapping[cfg.fields[req].key], STATE.importCtx.headers.length)) {
-      alert('Не заполнено обязательное поле: ' + cfg.fields[req].label);
+      showAlert('Внимание', 'Не заполнено обязательное поле: ' + cfg.fields[req].label);
       return;
     }
   }
   if ((STATE.importCtx.type === 'cost' || STATE.importCtx.type === 'supplier') &&
       !isValidIndexV2(mapping.name, STATE.importCtx.headers.length) &&
       !isValidIndexV2(mapping.article, STATE.importCtx.headers.length)) {
-    alert('Для сопоставления укажите колонку Номенклатура или Артикул.');
+    showAlert('Внимание', 'Для сопоставления укажите колонку Номенклатура или Артикул.');
     return;
   }
 
@@ -1918,7 +2123,7 @@ function confirmImport() {
       rows.push(item);
     }
     if (!rows.length) {
-      alert('После фильтрации не осталось строк с номенклатурой.');
+      showAlert('Внимание', 'После фильтрации не осталось строк с номенклатурой.');
       return;
     }
     payload = {
@@ -1941,7 +2146,7 @@ function confirmImport() {
       mappedRows.push({ name: name, article: article, value: value });
     }
     if (!mappedRows.length) {
-      alert('Не найдено валидных строк для импорта.');
+      showAlert('Внимание', 'Не найдено валидных строк для импорта.');
       return;
     }
     payload = {
@@ -2598,6 +2803,7 @@ function showTab(tabId) {
     syncCalcParamsFromParams(STATE.params || getParamsFromUI());
   });
   if (tabId === 'verify') populateVerifySelect();
+  initIcons();
 }
 
 function loadExportData() {
@@ -2676,130 +2882,14 @@ function loadBundlesUI() {
     .getBundleData();
 }
 
-function renderBundlesUI(data) {
-  data = data || { rows: [], bundles: [], manualItems: [], stats: null };
-  renderBundleSpecSelectors(data.bundles || []);
-  renderBundleManualRows(data.manualItems || []);
-  renderBundleRows(data.rows || []);
-  renderBundleStats(data.stats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 });
-}
-
 function renderBundleStats(stats) {
   var host = document.getElementById('bundles-stats');
   if (!host) return;
   host.innerHTML =
-    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборов в импорте: ' + (stats.totalSets || 0) + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#6f5bd3"></span>Загружено комплектаций: ' + (stats.loadedBundles || 0) + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#1f6b57"></span>Строк состава: ' + (stats.compositionRows || 0) + '</span>' +
-    '<span class="stat-item"><span class="stat-dot" style="background:#b7791f"></span>Без найденной себестоимости: ' + (stats.unresolvedComponents || 0) + '</span>';
-}
-
-function renderBundleSpecSelectors(bundles) {
-  var host = document.getElementById('bundle-specs');
-  if (!host) return;
-  host.innerHTML = '';
-
-  if (!bundles.length) {
-    host.innerHTML = '<div class="hint">Пока нет загруженных комплектов.</div>';
-    return;
-  }
-
-  for (var i = 0; i < bundles.length; i++) {
-    var item = bundles[i];
-    var wrap = document.createElement('div');
-    wrap.className = 'bundle-spec-item';
-
-    var title = document.createElement('label');
-    title.textContent = item.bundle;
-    wrap.appendChild(title);
-
-    var select = document.createElement('select');
-    select.className = 'bundle-spec-select';
-    select.setAttribute('data-bundle', item.bundle);
-    for (var j = 0; j < item.specs.length; j++) {
-      var opt = document.createElement('option');
-      opt.value = item.specs[j];
-      opt.textContent = item.specs[j];
-      if (item.activeSpec === item.specs[j]) opt.selected = true;
-      select.appendChild(opt);
-    }
-    wrap.appendChild(select);
-    host.appendChild(wrap);
-  }
-}
-
-function renderBundleManualRows(items) {
-  var tbody = document.getElementById('bundle-manual-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  if (!items.length) {
-    var trEmpty = document.createElement('tr');
-    trEmpty.innerHTML = '<td colspan="3" class="muted-cell">Все компоненты уже имеют найденную себестоимость.</td>';
-    tbody.appendChild(trEmpty);
-    return;
-  }
-
-  for (var i = 0; i < items.length; i++) {
-    var item = items[i];
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td>' + esc(item.component) + '</td>' +
-      '<td class="num">' + esc(item.usageCount || 0) + '</td>' +
-      '<td><input type="number" step="0.01" class="rate-input" data-component="' + esc(item.component) + '" value="' + (item.manualCost === '' ? '' : item.manualCost) + '"></td>';
-    tbody.appendChild(tr);
-  }
-}
-
-function renderBundleRows(rows) {
-  var tbody = document.getElementById('bundles-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  if (!rows.length) {
-    var trEmpty = document.createElement('tr');
-    trEmpty.innerHTML = '<td colspan="10" class="muted-cell">Комплектации наборов ещё не загружены.</td>';
-    tbody.appendChild(trEmpty);
-    return;
-  }
-
-  for (var i = 0; i < rows.length; i++) {
-    var item = rows[i];
-    var tr = document.createElement('tr');
-    if (item.active) tr.classList.add('bundle-active-row');
-    tr.innerHTML =
-      '<td>' + esc(item.component) + '</td>' +
-      '<td>' + esc(item.bundle) + '</td>' +
-      '<td>' + esc(item.specification) + '</td>' +
-      '<td class="num">' + fmt(item.quantity) + '</td>' +
-      '<td>' + (item.active ? '<span class="badge badge-flakon">Да</span>' : '—') + '</td>' +
-      '<td class="num">' + fmt(item.cost1C) + '</td>' +
-      '<td class="num' + (parseNumberV2(item.calcCost) === 0 ? ' zero-value' : '') + '">' + fmt(item.calcCost) + '</td>' +
-      '<td class="num' + (item.manualCost === '' ? '' : ' bundle-manual-cost') + '">' + (item.manualCost === '' ? '—' : fmt(item.manualCost)) + '</td>' +
-      '<td class="num col-total">' + fmt(item.usedCost) + '</td>' +
-      '<td>' + esc(item.source || '') + '</td>';
-    tbody.appendChild(tr);
-  }
-}
-
-function collectBundlePayload() {
-  var activeSpecs = {};
-  var manualCosts = {};
-  var specSelects = document.querySelectorAll('#bundle-specs select[data-bundle]');
-  var manualInputs = document.querySelectorAll('#bundle-manual-tbody input[data-component]');
-
-  for (var i = 0; i < specSelects.length; i++) {
-    activeSpecs[specSelects[i].getAttribute('data-bundle')] = specSelects[i].value;
-  }
-  for (var j = 0; j < manualInputs.length; j++) {
-    var raw = String(manualInputs[j].value || '').trim();
-    manualCosts[manualInputs[j].getAttribute('data-component')] = raw === '' ? '' : parseFloat(raw);
-  }
-
-  return {
-    activeSpecs: activeSpecs,
-    manualCosts: manualCosts
-  };
+    '<span class="stat-item"><span class="stat-dot" style="background:#64748b"></span>Наборов в импорте: ' + (stats.totalSets || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#3b82f6"></span>Загружено комплектаций: ' + (stats.loadedBundles || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#22c55e"></span>Строк состава: ' + (stats.compositionRows || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#f59e0b"></span>Без найденной себестоимости: ' + (stats.unresolvedComponents || 0) + '</span>';
 }
 
 function saveBundleDataUI() {
@@ -2832,14 +2922,14 @@ function confirmImport() {
 
   for (var req = 0; req < cfg.fields.length; req++) {
     if (cfg.fields[req].required && !isValidIndexV2(mapping[cfg.fields[req].key], STATE.importCtx.headers.length)) {
-      alert('Не заполнено обязательное поле: ' + cfg.fields[req].label);
+      showAlert('Внимание', 'Не заполнено обязательное поле: ' + cfg.fields[req].label);
       return;
     }
   }
   if ((STATE.importCtx.type === 'cost' || STATE.importCtx.type === 'supplier') &&
       !isValidIndexV2(mapping.name, STATE.importCtx.headers.length) &&
       !isValidIndexV2(mapping.article, STATE.importCtx.headers.length)) {
-    alert('Для сопоставления укажите колонку Номенклатура или Артикул.');
+    showAlert('Внимание', 'Для сопоставления укажите колонку Номенклатура или Артикул.');
     return;
   }
 
@@ -2858,7 +2948,7 @@ function confirmImport() {
       rows.push(item);
     }
     if (!rows.length) {
-      alert('После фильтрации не осталось строк с номенклатурой.');
+      showAlert('Внимание', 'После фильтрации не осталось строк с номенклатурой.');
       return;
     }
     payload = {
@@ -2886,7 +2976,7 @@ function confirmImport() {
       });
     }
     if (!bundleRows.length) {
-      alert('Не найдено валидных строк комплектаций наборов.');
+      showAlert('Внимание', 'Не найдено валидных строк комплектаций наборов.');
       return;
     }
     payload = {
@@ -2905,7 +2995,7 @@ function confirmImport() {
       mappedRows.push({ name: name, article: article, value: value });
     }
     if (!mappedRows.length) {
-      alert('Не найдено валидных строк для импорта.');
+      showAlert('Внимание', 'Не найдено валидных строк для импорта.');
       return;
     }
     payload = {
@@ -2949,27 +3039,6 @@ function confirmImport() {
   if (cfg.endpoint === 'importBundleCompositions') runner.importBundleCompositions(payload);
 }
 
-var BUNDLE_SPEC_COLUMNS = [
-  { key: 'bundle', label: 'Набор', numeric: false },
-  { key: 'matched', label: 'Статус', numeric: false },
-  { key: 'compositionRows', label: 'Строк состава', numeric: true },
-  { key: 'specCount', label: 'Спецификаций', numeric: true },
-  { key: 'activeSpec', label: 'Активная спецификация', numeric: false }
-];
-
-var BUNDLE_ROWS_COLUMNS = [
-  { key: 'component', label: 'Компонент', numeric: false },
-  { key: 'bundle', label: 'Набор', numeric: false },
-  { key: 'specification', label: 'Спецификация', numeric: false },
-  { key: 'quantity', label: 'Кол-во', numeric: true },
-  { key: 'active', label: 'Активная', numeric: false },
-  { key: 'cost1C', label: 'Себес 1С', numeric: true },
-  { key: 'calcCost', label: 'Себестоимость по расчёту', numeric: true },
-  { key: 'manualCost', label: 'Ручная стоимость', numeric: true },
-  { key: 'usedCost', label: 'Используемая стоимость', numeric: true },
-  { key: 'source', label: 'Источник', numeric: false }
-];
-
 STATE.bundleSpecSort = STATE.bundleSpecSort || { key: 'bundle', dir: 'asc' };
 STATE.bundleRowsSort = STATE.bundleRowsSort || { key: 'bundle', dir: 'asc' };
 
@@ -2987,104 +3056,89 @@ function getBundleSpecStatusLabel(item) {
   return item.matched ? 'С комплектацией' : 'Без комплектации';
 }
 
-function getBundleSpecSortIndicator(key) {
-  if (STATE.bundleSpecSort.key !== key) return ' ↕';
-  return STATE.bundleSpecSort.dir === 'asc' ? ' ↑' : ' ↓';
-}
-
-function renderBundleSpecHeaders() {
-  var thead = document.getElementById('bundle-spec-thead');
-  if (!thead) return;
-  thead.innerHTML = '';
-
-  for (var i = 0; i < BUNDLE_SPEC_COLUMNS.length; i++) {
-    var col = BUNDLE_SPEC_COLUMNS[i];
-    var th = document.createElement('th');
-    th.className = 'sortable-col';
-    th.textContent = col.label + getBundleSpecSortIndicator(col.key);
-    th.setAttribute('data-key', col.key);
-    th.addEventListener('click', function() {
-      var key = this.getAttribute('data-key');
-      if (STATE.bundleSpecSort.key === key) {
-        STATE.bundleSpecSort.dir = STATE.bundleSpecSort.dir === 'asc' ? 'desc' : 'asc';
-      } else {
-        STATE.bundleSpecSort.key = key;
-        STATE.bundleSpecSort.dir = 'asc';
-      }
-      renderBundleSpecTable();
-    });
-    thead.appendChild(th);
-  }
-}
-
-function compareBundleSpecItems(a, b, key) {
-  var av;
-  var bv;
-  if (key === 'matched') {
-    av = getBundleSpecStatusLabel(a);
-    bv = getBundleSpecStatusLabel(b);
-  } else {
-    av = a[key];
-    bv = b[key];
-  }
-
-  var aNum = parseNumberV2(av);
-  var bNum = parseNumberV2(bv);
-  if (aNum !== null && bNum !== null) return aNum - bNum;
-  return String(av || '').localeCompare(String(bv || ''), 'ru', { sensitivity: 'base', numeric: true });
-}
-
-function getFilteredBundleSpecs() {
-  var items = (STATE.bundleData && STATE.bundleData.bundles) ? STATE.bundleData.bundles.slice() : [];
-  var query = String((document.getElementById('bundle-spec-search') || {}).value || '').toLowerCase().trim();
-  var matchFilter = (document.getElementById('bundle-spec-match-filter') || {}).value || '';
-
-  items = items.filter(function(item) {
-    var haystack = [item.bundle, item.activeSpec, getBundleSpecStatusLabel(item)].join(' ').toLowerCase();
-    if (query && haystack.indexOf(query) < 0) return false;
-    if (matchFilter === 'matched' && !item.matched) return false;
-    if (matchFilter === 'missing' && item.matched) return false;
-    return true;
-  });
-
-  items.sort(function(a, b) {
-    var cmp = compareBundleSpecItems(a, b, STATE.bundleSpecSort.key);
-    return STATE.bundleSpecSort.dir === 'asc' ? cmp : -cmp;
-  });
-
-  return items;
-}
-
+/* ── Bundle Spec Table (Tabulator) ── */
 function renderBundleSpecTable(bundles) {
   if (bundles) {
     STATE.bundleData = STATE.bundleData || {};
     STATE.bundleData.bundles = bundles;
   }
+  var items = (STATE.bundleData && STATE.bundleData.bundles) ? STATE.bundleData.bundles : [];
 
-  renderBundleSpecHeaders();
-  var tbody = document.getElementById('bundle-spec-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+  if (typeof Tabulator !== 'undefined') {
+    var specData = items.map(function(item) {
+      return {
+        bundle: item.bundle,
+        status: getBundleSpecStatusLabel(item),
+        matched: item.matched,
+        compositionRows: item.compositionRows || 0,
+        specCount: item.specCount || 0,
+        activeSpec: item.activeSpec || '',
+        specs: item.specs || [],
+        importedOnly: item.importedOnly
+      };
+    });
 
-  var items = getFilteredBundleSpecs();
-  if (!items.length) {
-    var trEmpty = document.createElement('tr');
-    trEmpty.innerHTML = '<td colspan="5" class="muted-cell">Нет наборов для отображения.</td>';
-    tbody.appendChild(trEmpty);
-    return;
-  }
+    var columns = [
+      { title: 'Набор', field: 'bundle', frozen: true, headerFilter: 'input', minWidth: 160 },
+      {
+        title: 'Статус', field: 'status', headerFilter: 'list',
+        headerFilterParams: { values: { '': 'Все', 'С комплектацией': 'С комплектацией', 'Без комплектации': 'Без комплектации', 'Только в составе': 'Только в составе' } },
+        formatter: function(cell) {
+          var v = cell.getValue();
+          if (v === 'Без комплектации') return '<span class="badge badge-raw">' + v + '</span>';
+          if (v === 'С комплектацией') return '<span class="badge badge-finished">' + v + '</span>';
+          return '<span class="badge">' + v + '</span>';
+        }
+      },
+      { title: 'Строк состава', field: 'compositionRows', hozAlign: 'right', formatter: fmtNumber, formatterParams: { decimals: 0 } },
+      { title: 'Спецификаций', field: 'specCount', hozAlign: 'right', formatter: fmtNumber, formatterParams: { decimals: 0 } },
+      {
+        title: 'Активная спецификация', field: 'activeSpec', minWidth: 200,
+        formatter: function(cell) {
+          var row = cell.getRow().getData();
+          if (!row.matched || !row.specs || !row.specs.length) {
+            return '<span class="bundle-missing-chip">Нет комплектации</span>';
+          }
+          var html = '<select class="bundle-spec-select" data-bundle="' + esc(row.bundle) + '">';
+          for (var i = 0; i < row.specs.length; i++) {
+            var sel = row.activeSpec === row.specs[i] ? ' selected' : '';
+            html += '<option value="' + esc(row.specs[i]) + '"' + sel + '>' + esc(row.specs[i]) + '</option>';
+          }
+          html += '</select>';
+          return html;
+        }
+      }
+    ];
 
-  for (var i = 0; i < items.length; i++) {
-    var item = items[i];
-    var tr = document.createElement('tr');
-    if (!item.matched) tr.classList.add('bundle-unmatched-row');
-    tr.innerHTML =
-      '<td>' + esc(item.bundle) + '</td>' +
-      '<td>' + esc(getBundleSpecStatusLabel(item)) + '</td>' +
-      '<td class="num">' + fmt(item.compositionRows || 0) + '</td>' +
-      '<td class="num">' + fmt(item.specCount || 0) + '</td>' +
-      '<td>' + buildBundleSpecCellHtml(item) + '</td>';
-    tbody.appendChild(tr);
+    STATE.tables.bundleSpec = createTable('bundle-spec-container', columns, specData, {
+      height: '40vh',
+      initialSort: [{ column: 'bundle', dir: 'asc' }],
+      rowFormatter: function(row) {
+        if (!row.getData().matched) {
+          row.getElement().style.opacity = '0.6';
+        }
+      }
+    });
+  } else {
+    /* Vanilla fallback */
+    var container = document.getElementById('bundle-spec-container');
+    if (!container) return;
+    container.innerHTML = '<table class="data-table"><thead><tr>' +
+      '<th>Набор</th><th>Статус</th><th>Строк состава</th><th>Спецификаций</th><th>Активная спецификация</th>' +
+      '</tr></thead><tbody id="bundle-spec-tbody"></tbody></table>';
+    var tbody = document.getElementById('bundle-spec-tbody');
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var tr = document.createElement('tr');
+      if (!item.matched) tr.classList.add('bundle-unmatched-row');
+      tr.innerHTML =
+        '<td>' + esc(item.bundle) + '</td>' +
+        '<td>' + esc(getBundleSpecStatusLabel(item)) + '</td>' +
+        '<td class="num">' + fmt(item.compositionRows || 0) + '</td>' +
+        '<td class="num">' + fmt(item.specCount || 0) + '</td>' +
+        '<td>' + buildBundleSpecCellHtml(item) + '</td>';
+      tbody.appendChild(tr);
+    }
   }
 }
 
@@ -3092,7 +3146,6 @@ function buildBundleSpecCellHtml(item) {
   if (!item.matched || !item.specs || !item.specs.length) {
     return '<span class="bundle-missing-chip">Нет комплектации</span>';
   }
-
   var html = '<select class="bundle-spec-select" data-bundle="' + esc(item.bundle) + '">';
   for (var i = 0; i < item.specs.length; i++) {
     var selected = item.activeSpec === item.specs[i] ? ' selected' : '';
@@ -3103,168 +3156,208 @@ function buildBundleSpecCellHtml(item) {
 }
 
 function filterBundleSpecTable() {
+  /* Tabulator handles filtering via headerFilter; no-op when active */
+  if (STATE.tables.bundleSpec) return;
   renderBundleSpecTable();
 }
 
-function getBundleRowsSortIndicator(key) {
-  if (STATE.bundleRowsSort.key !== key) return ' ↕';
-  return STATE.bundleRowsSort.dir === 'asc' ? ' ↑' : ' ↓';
-}
-
-function renderBundleRowsHeaders() {
-  var thead = document.getElementById('bundle-rows-thead');
-  if (!thead) return;
-  thead.innerHTML = '';
-
-  for (var i = 0; i < BUNDLE_ROWS_COLUMNS.length; i++) {
-    var col = BUNDLE_ROWS_COLUMNS[i];
-    var th = document.createElement('th');
-    th.className = 'sortable-col' + (col.key === 'usedCost' ? ' col-total' : '');
-    th.textContent = col.label + getBundleRowsSortIndicator(col.key);
-    th.setAttribute('data-key', col.key);
-    th.addEventListener('click', function() {
-      var key = this.getAttribute('data-key');
-      if (STATE.bundleRowsSort.key === key) {
-        STATE.bundleRowsSort.dir = STATE.bundleRowsSort.dir === 'asc' ? 'desc' : 'asc';
-      } else {
-        STATE.bundleRowsSort.key = key;
-        STATE.bundleRowsSort.dir = 'asc';
-      }
-      renderBundleRows();
+/* ── Bundle Manual Table (Tabulator) ── */
+function renderBundleManualRows(items) {
+  if (typeof Tabulator !== 'undefined') {
+    var data = (items || []).map(function(item) {
+      return {
+        component: item.component,
+        usageCount: item.usageCount || 0,
+        manualCost: item.manualCost === '' ? null : item.manualCost
+      };
     });
-    thead.appendChild(th);
+
+    var columns = [
+      { title: 'Компонент', field: 'component', minWidth: 200, headerFilter: 'input' },
+      { title: 'Использований', field: 'usageCount', hozAlign: 'right', formatter: fmtNumber, formatterParams: { decimals: 0 }, width: 120 },
+      {
+        title: 'Ручная стоимость, ₽', field: 'manualCost', hozAlign: 'right', width: 180,
+        editor: 'number', editorParams: { step: 0.01 },
+        formatter: function(cell) {
+          var v = cell.getValue();
+          if (v === null || v === undefined || v === '') return '';
+          return fmtNumber(cell, { decimals: 2 });
+        }
+      }
+    ];
+
+    STATE.tables.bundleManual = createTable('bundle-manual-container', columns, data, {
+      height: '35vh',
+      placeholder: 'Все компоненты уже имеют найденную себестоимость.'
+    });
+  } else {
+    /* Vanilla fallback */
+    var container = document.getElementById('bundle-manual-container');
+    if (!container) return;
+    container.innerHTML = '<table class="data-table editable"><thead><tr>' +
+      '<th>Компонент</th><th>Использований</th><th>Ручная стоимость, ₽</th>' +
+      '</tr></thead><tbody id="bundle-manual-tbody"></tbody></table>';
+    var tbody = document.getElementById('bundle-manual-tbody');
+    if (!items || !items.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="muted-cell">Все компоненты уже имеют найденную себестоимость.</td></tr>';
+      return;
+    }
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + esc(item.component) + '</td>' +
+        '<td class="num">' + esc(item.usageCount || 0) + '</td>' +
+        '<td><input type="number" step="0.01" class="rate-input" data-component="' + esc(item.component) + '" value="' + (item.manualCost === '' ? '' : item.manualCost) + '"></td>';
+      tbody.appendChild(tr);
+    }
   }
 }
 
-function syncBundleRowsFilterOptions(rows) {
-  syncBundleRowsFilterSelect('bundle-rows-bundle-filter', rows, 'bundle', 'Все наборы');
-  syncBundleRowsFilterSelect('bundle-rows-spec-filter', rows, 'specification', 'Все спецификации');
-  syncBundleRowsFilterSelect('bundle-rows-source-filter', rows, 'source', 'Все источники');
-}
-
-function syncBundleRowsFilterSelect(id, rows, key, emptyLabel) {
-  var select = document.getElementById(id);
-  if (!select) return;
-  var current = select.value;
-  var values = {};
-
-  for (var i = 0; i < rows.length; i++) {
-    var value = String(rows[i][key] || '').trim();
-    if (value) values[value] = true;
-  }
-
-  var options = Object.keys(values).sort(function(a, b) {
-    return a.localeCompare(b, 'ru', { sensitivity: 'base', numeric: true });
-  });
-
-  select.innerHTML = '';
-  var empty = document.createElement('option');
-  empty.value = '';
-  empty.textContent = emptyLabel;
-  select.appendChild(empty);
-
-  for (var j = 0; j < options.length; j++) {
-    var opt = document.createElement('option');
-    opt.value = options[j];
-    opt.textContent = options[j];
-    if (current === options[j]) opt.selected = true;
-    select.appendChild(opt);
-  }
-}
-
-function compareBundleRows(a, b, key) {
-  var av = key === 'active' ? (a.active ? 1 : 0) : a[key];
-  var bv = key === 'active' ? (b.active ? 1 : 0) : b[key];
-  var aNum = parseNumberV2(av);
-  var bNum = parseNumberV2(bv);
-  if (aNum !== null && bNum !== null) return aNum - bNum;
-  return String(av || '').localeCompare(String(bv || ''), 'ru', { sensitivity: 'base', numeric: true });
-}
-
-function getFilteredBundleRows() {
-  var rows = (STATE.bundleData && STATE.bundleData.rows) ? STATE.bundleData.rows.slice() : [];
-  var query = String((document.getElementById('bundle-rows-search') || {}).value || '').toLowerCase().trim();
-  var bundleFilter = (document.getElementById('bundle-rows-bundle-filter') || {}).value || '';
-  var specFilter = (document.getElementById('bundle-rows-spec-filter') || {}).value || '';
-  var sourceFilter = (document.getElementById('bundle-rows-source-filter') || {}).value || '';
-  var activeFilter = (document.getElementById('bundle-rows-active-filter') || {}).value || '';
-
-  rows = rows.filter(function(item) {
-    var haystack = [item.component, item.bundle, item.specification, item.source].join(' ').toLowerCase();
-    if (query && haystack.indexOf(query) < 0) return false;
-    if (bundleFilter && item.bundle !== bundleFilter) return false;
-    if (specFilter && item.specification !== specFilter) return false;
-    if (sourceFilter && item.source !== sourceFilter) return false;
-    if (activeFilter === 'active' && !item.active) return false;
-    if (activeFilter === 'inactive' && item.active) return false;
-    return true;
-  });
-
-  rows.sort(function(a, b) {
-    var cmp = compareBundleRows(a, b, STATE.bundleRowsSort.key);
-    return STATE.bundleRowsSort.dir === 'asc' ? cmp : -cmp;
-  });
-
-  return rows;
-}
-
+/* ── Bundle Rows Table (Tabulator) ── */
 function renderBundleRows(rows) {
   if (rows) {
     STATE.bundleData = STATE.bundleData || {};
     STATE.bundleData.rows = rows;
   }
-
   var allRows = (STATE.bundleData && STATE.bundleData.rows) ? STATE.bundleData.rows : [];
-  syncBundleRowsFilterOptions(allRows);
-  renderBundleRowsHeaders();
 
-  var tbody = document.getElementById('bundles-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+  if (typeof Tabulator !== 'undefined') {
+    var columns = [
+      { title: 'Компонент', field: 'component', frozen: true, headerFilter: 'input', minWidth: 160 },
+      { title: 'Набор', field: 'bundle', headerFilter: 'list', headerFilterFunc: '=', headerFilterParams: { valuesLookup: true, sortValuesList: 'asc' }, minWidth: 130 },
+      { title: 'Спецификация', field: 'specification', headerFilter: 'list', headerFilterFunc: '=', headerFilterParams: { valuesLookup: true, sortValuesList: 'asc' }, minWidth: 130 },
+      { title: 'Кол-во', field: 'quantity', hozAlign: 'right', formatter: fmtNumber, formatterParams: { decimals: 2 }, width: 90 },
+      {
+        title: 'Активная', field: 'active', hozAlign: 'center', width: 90,
+        headerFilter: 'list', headerFilterParams: { values: { '': 'Все', 'true': 'Да', 'false': 'Нет' } },
+        headerFilterFunc: function(headerVal, rowVal) {
+          if (!headerVal) return true;
+          return String(rowVal) === headerVal;
+        },
+        formatter: function(cell) {
+          return cell.getValue() ? '<span class="badge badge-flakon">Да</span>' : '—';
+        }
+      },
+      { title: 'Себес 1С', field: 'cost1C', hozAlign: 'right', formatter: fmtNumber, formatterParams: { decimals: 2 }, width: 110 },
+      {
+        title: 'Себестоимость по расчёту', field: 'calcCost', hozAlign: 'right', width: 160,
+        formatter: function(cell) {
+          var v = cell.getValue();
+          if (v === null || v === undefined || v === '') return '';
+          var n = parseFloat(v);
+          if (isNaN(n)) return v;
+          if (n === 0) cell.getElement().classList.add('zero-val');
+          return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        }
+      },
+      {
+        title: 'Ручная стоимость', field: 'manualCost', hozAlign: 'right', width: 140,
+        formatter: function(cell) {
+          var v = cell.getValue();
+          if (v === '' || v === null || v === undefined) return '—';
+          var n = parseFloat(v);
+          if (isNaN(n)) return v;
+          cell.getElement().classList.add('bundle-manual-cost');
+          return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        }
+      },
+      { title: 'Используемая стоимость', field: 'usedCost', hozAlign: 'right', cssClass: 'col-total', formatter: fmtNumber, formatterParams: { decimals: 2 }, width: 160 },
+      { title: 'Источник', field: 'source', headerFilter: 'list', headerFilterFunc: '=', headerFilterParams: { valuesLookup: true, sortValuesList: 'asc' }, minWidth: 120 }
+    ];
 
-  var filteredRows = getFilteredBundleRows();
-  if (!filteredRows.length) {
-    var trEmpty = document.createElement('tr');
-    trEmpty.innerHTML = '<td colspan="10" class="muted-cell">Нет строк, подходящих под текущие фильтры.</td>';
-    tbody.appendChild(trEmpty);
-    return;
-  }
+    STATE.tables.bundleRows = createTable('bundle-rows-container', columns, allRows, {
+      height: '55vh',
+      initialSort: [{ column: 'bundle', dir: 'asc' }],
+      rowFormatter: function(row) {
+        if (row.getData().active) {
+          row.getElement().style.background = 'rgba(59, 130, 246, 0.04)';
+        }
+      }
+    });
+  } else {
+    /* Vanilla fallback */
+    var container = document.getElementById('bundle-rows-container');
+    if (!container) return;
+    container.innerHTML = '<table class="data-table"><thead><tr id="bundle-rows-thead"></tr></thead><tbody id="bundles-tbody"></tbody></table>';
 
-  for (var i = 0; i < filteredRows.length; i++) {
-    var item = filteredRows[i];
-    var tr = document.createElement('tr');
-    if (item.active) tr.classList.add('bundle-active-row');
-    tr.innerHTML =
-      '<td>' + esc(item.component) + '</td>' +
-      '<td>' + esc(item.bundle) + '</td>' +
-      '<td>' + esc(item.specification) + '</td>' +
-      '<td class="num">' + fmt(item.quantity) + '</td>' +
-      '<td>' + (item.active ? '<span class="badge badge-flakon">Да</span>' : '—') + '</td>' +
-      '<td class="num">' + fmt(item.cost1C) + '</td>' +
-      '<td class="num' + (parseNumberV2(item.calcCost) === 0 ? ' zero-value' : '') + '">' + fmt(item.calcCost) + '</td>' +
-      '<td class="num' + (item.manualCost === '' ? '' : ' bundle-manual-cost') + '">' + (item.manualCost === '' ? '—' : fmt(item.manualCost)) + '</td>' +
-      '<td class="num col-total">' + fmt(item.usedCost) + '</td>' +
-      '<td>' + esc(item.source || '') + '</td>';
-    tbody.appendChild(tr);
+    var BUNDLE_ROWS_COLUMNS = [
+      { key: 'component', label: 'Компонент' }, { key: 'bundle', label: 'Набор' },
+      { key: 'specification', label: 'Спецификация' }, { key: 'quantity', label: 'Кол-во' },
+      { key: 'active', label: 'Активная' }, { key: 'cost1C', label: 'Себес 1С' },
+      { key: 'calcCost', label: 'Себестоимость по расчёту' }, { key: 'manualCost', label: 'Ручная стоимость' },
+      { key: 'usedCost', label: 'Используемая стоимость' }, { key: 'source', label: 'Источник' }
+    ];
+    var thead = document.getElementById('bundle-rows-thead');
+    for (var h = 0; h < BUNDLE_ROWS_COLUMNS.length; h++) {
+      var th = document.createElement('th');
+      th.textContent = BUNDLE_ROWS_COLUMNS[h].label;
+      thead.appendChild(th);
+    }
+    var tbody = document.getElementById('bundles-tbody');
+    for (var i = 0; i < allRows.length; i++) {
+      var item = allRows[i];
+      var tr = document.createElement('tr');
+      if (item.active) tr.classList.add('bundle-active-row');
+      tr.innerHTML =
+        '<td>' + esc(item.component) + '</td>' +
+        '<td>' + esc(item.bundle) + '</td>' +
+        '<td>' + esc(item.specification) + '</td>' +
+        '<td class="num">' + fmt(item.quantity) + '</td>' +
+        '<td>' + (item.active ? '<span class="badge badge-flakon">Да</span>' : '—') + '</td>' +
+        '<td class="num">' + fmt(item.cost1C) + '</td>' +
+        '<td class="num' + (parseNumberV2(item.calcCost) === 0 ? ' zero-value' : '') + '">' + fmt(item.calcCost) + '</td>' +
+        '<td class="num' + (item.manualCost === '' ? '' : ' bundle-manual-cost') + '">' + (item.manualCost === '' ? '—' : fmt(item.manualCost)) + '</td>' +
+        '<td class="num col-total">' + fmt(item.usedCost) + '</td>' +
+        '<td>' + esc(item.source || '') + '</td>';
+      tbody.appendChild(tr);
+    }
   }
 }
 
 function filterBundleRowsTable() {
+  /* Tabulator handles filtering via headerFilter; no-op when active */
+  if (STATE.tables.bundleRows) return;
   renderBundleRows();
 }
 
 function collectBundlePayload() {
   var activeSpecs = {};
   var manualCosts = {};
-  var specSelects = document.querySelectorAll('#bundle-spec-tbody select[data-bundle]');
-  var manualInputs = document.querySelectorAll('#bundle-manual-tbody input[data-component]');
 
-  for (var i = 0; i < specSelects.length; i++) {
-    activeSpecs[specSelects[i].getAttribute('data-bundle')] = specSelects[i].value;
+  /* Read spec selections — from Tabulator or DOM */
+  if (STATE.tables.bundleSpec) {
+    var specData = STATE.tables.bundleSpec.getData();
+    for (var s = 0; s < specData.length; s++) {
+      if (specData[s].matched && specData[s].activeSpec) {
+        activeSpecs[specData[s].bundle] = specData[s].activeSpec;
+      }
+    }
+    /* Also check for user-changed selects rendered inside Tabulator cells */
+    var specSelects = document.querySelectorAll('#bundle-spec-container select[data-bundle]');
+    for (var i = 0; i < specSelects.length; i++) {
+      activeSpecs[specSelects[i].getAttribute('data-bundle')] = specSelects[i].value;
+    }
+  } else {
+    var specSelectsFb = document.querySelectorAll('#bundle-spec-container select[data-bundle], #bundle-spec-tbody select[data-bundle]');
+    for (var k = 0; k < specSelectsFb.length; k++) {
+      activeSpecs[specSelectsFb[k].getAttribute('data-bundle')] = specSelectsFb[k].value;
+    }
   }
-  for (var j = 0; j < manualInputs.length; j++) {
-    var raw = String(manualInputs[j].value || '').trim();
-    manualCosts[manualInputs[j].getAttribute('data-component')] = raw === '' ? '' : parseFloat(raw);
+
+  /* Read manual costs — from Tabulator or DOM */
+  if (STATE.tables.bundleManual) {
+    var manualData = STATE.tables.bundleManual.getData();
+    for (var m = 0; m < manualData.length; m++) {
+      var raw = manualData[m].manualCost;
+      manualCosts[manualData[m].component] = (raw === null || raw === undefined || raw === '') ? '' : parseFloat(raw);
+    }
+  } else {
+    var manualInputs = document.querySelectorAll('#bundle-manual-container input[data-component], #bundle-manual-tbody input[data-component]');
+    for (var j = 0; j < manualInputs.length; j++) {
+      var rawVal = String(manualInputs[j].value || '').trim();
+      manualCosts[manualInputs[j].getAttribute('data-component')] = rawVal === '' ? '' : parseFloat(rawVal);
+    }
   }
 
   return {
