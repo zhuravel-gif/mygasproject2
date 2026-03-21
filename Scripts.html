@@ -506,11 +506,14 @@ function loadExportData() {
 }
 
 // Индексы в строке данных (соответствуют CFG в DataService.js)
+var EXPORT_PRICE_COL = 15;
 var EXPORT_NDS_COL = 16;
 var EXPORT_TAX_COL = 17;
 
 function renderExportTable(data) {
   if (!data || !data.headers) return;
+
+  STATE.exportData = data;
 
   if (typeof Tabulator === 'undefined') {
     // Vanilla fallback — render simple table
@@ -557,6 +560,18 @@ function renderExportTable(data) {
       colDef.minWidth = 200;
       colDef.headerFilter = 'input';
       colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (c === EXPORT_PRICE_COL) {
+      // Editable supplier price column
+      colDef.editor = 'number';
+      colDef.editorParams = { step: 0.01, min: 0 };
+      colDef.hozAlign = 'right';
+      colDef.minWidth = 100;
+      colDef.cssClass = 'calc-col';
+      colDef.formatter = function(cell) {
+        var val = cell.getValue();
+        if (val === null || val === undefined || val === '') return '0';
+        return parseFloat(val).toFixed(2);
+      };
     } else if (c === EXPORT_NDS_COL || c === EXPORT_TAX_COL) {
       // Editable NDS/Tax columns
       colDef.editor = 'number';
@@ -600,7 +615,12 @@ function renderExportTable(data) {
       var field = cell.getColumn().getField();
       var rowData = cell.getRow().getData();
       var rowIndex = rowData._rowIndex;
-      var fieldName = (field === 'col' + EXPORT_NDS_COL) ? 'nds' : 'tax';
+      var colIndex = parseInt(field.replace('col', ''), 10);
+      var fieldName = colIndex === EXPORT_PRICE_COL ? 'supplierPrice' : (colIndex === EXPORT_NDS_COL ? 'nds' : 'tax');
+      // Sync change back to STATE.exportData
+      if (STATE.exportData && STATE.exportData.rows && STATE.exportData.rows[rowIndex]) {
+        STATE.exportData.rows[rowIndex][colIndex] = cell.getValue();
+      }
       onNdsTaxChange(rowIndex, fieldName, cell.getValue());
     }
   });
@@ -2544,108 +2564,11 @@ function getFilteredExportEntriesV3() {
   return entries;
 }
 
-function renderExportTable(data) {
-  if (!data || !data.headers) return;
-
-  STATE.exportData = data;
-  sanitizeExportFiltersV3(data);
-
-  var headers = getVisibleExportHeadersV3(data);
-  var order = getExportDisplayOrderV3(data);
-  var thead = document.getElementById('export-thead');
-  var tbody = document.getElementById('export-tbody');
-  thead.innerHTML = '';
-  tbody.innerHTML = '';
-
-  for (var h = 0; h < headers.length; h++) {
-    var sourceCol = order[h];
-    var th = document.createElement('th');
-    var full = String(headers[h] || '');
-    th.className = 'sortable-col';
-    th.textContent = (full.length > 30 ? full.substring(0, 28) + '...' : full) + getSortIndicatorV3(sourceCol);
-    th.title = full;
-    th.setAttribute('data-source-col', sourceCol);
-    th.addEventListener('click', function() {
-      toggleExportSortV3(parseInt(this.getAttribute('data-source-col'), 10));
-    });
-    if (sourceCol === EXPORT_PRICE_COL) th.style.background = '#fff4e5';
-    if (sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL) th.style.background = '#e8f5e9';
-    thead.appendChild(th);
-  }
-
-  renderExportSlicersV3(data);
-  renderExportRows(getFilteredExportEntriesV3());
-  applyExportStickyColumnsV3();
-}
-
-function renderExportRows(entries) {
-  var tbody = document.getElementById('export-tbody');
-  tbody.innerHTML = '';
-
-  for (var i = 0; i < entries.length; i++) {
-    var entry = entries[i];
-    var row = entry.row;
-    var visibleRow = entry.visibleRow;
-    var order = getExportDisplayOrderV3(STATE.exportData);
-    var originalIndex = entry.index;
-    var tr = document.createElement('tr');
-    tr.setAttribute('data-name', getExportSearchHaystackV3(visibleRow));
-
-    for (var j = 0; j < visibleRow.length; j++) {
-      var sourceCol = order[j];
-      var td = document.createElement('td');
-
-      if (sourceCol === EXPORT_PRICE_COL || sourceCol === EXPORT_NDS_COL || sourceCol === EXPORT_TAX_COL) {
-        var field = sourceCol === EXPORT_PRICE_COL ? 'supplierPrice' : (sourceCol === EXPORT_NDS_COL ? 'nds' : 'tax');
-        var inp = document.createElement('input');
-        var inputValue = normalizeExportValueV3(row[sourceCol]);
-        inp.type = 'number';
-        inp.className = 'rate-input nds-tax-input';
-        inp.step = sourceCol === EXPORT_PRICE_COL ? '0.01' : '0.001';
-        if (inputValue === '') inputValue = sourceCol === EXPORT_PRICE_COL ? '0' : (sourceCol === EXPORT_NDS_COL ? '0.22' : '0.065');
-        inp.value = inputValue;
-        inp.setAttribute('data-row', originalIndex);
-        inp.setAttribute('data-field', field);
-        td.style.background = sourceCol === EXPORT_PRICE_COL ? '#fffaf0' : '#f1f8e9';
-        td.style.padding = '2px 6px';
-        (function(el, rowIndex, fieldName, colIndex) {
-          el.addEventListener('input', function() {
-            this.classList.add('dirty');
-            if (STATE.exportData && STATE.exportData.rows && STATE.exportData.rows[rowIndex]) {
-              STATE.exportData.rows[rowIndex][colIndex] = this.value;
-            }
-          });
-          el.addEventListener('change', function() {
-            onNdsTaxChange(rowIndex, fieldName, this.value);
-          });
-        })(inp, originalIndex, field, sourceCol);
-        td.appendChild(inp);
-      } else {
-        var val = row[sourceCol];
-        if (EXPORT_NUMERIC_COLS[sourceCol]) {
-          var parsed = parseNumberV2(val);
-          if (parsed !== null) {
-            td.className = 'num';
-            td.textContent = parsed % 1 === 0 ? String(parsed) : parsed.toFixed(2);
-          } else {
-            td.textContent = normalizeExportValueV3(val);
-          }
-        } else {
-          td.textContent = normalizeExportValueV3(val);
-        }
-      }
-
-      tr.appendChild(td);
-    }
-
-    tbody.appendChild(tr);
-  }
-
-  applyExportStickyColumnsV3();
-}
+// Old renderExportTable/renderExportRows removed — replaced by Tabulator version (see line ~512)
 
 function filterExportTable() {
-  renderExportRows(getFilteredExportEntriesV3());
+  // When Tabulator is active, filtering is handled internally via headerFilter
+  // No-op for Tabulator; vanilla fallback not needed as table rebuilds fully
 }
 
 function renderExportStats(data) {
