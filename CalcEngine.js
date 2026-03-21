@@ -392,7 +392,9 @@ function buildBundleUiState_() {
     }),
     stats: {
       totalSets: Object.keys(knownSetNames).length,
-      loadedBundles: bundleSummary.filter(function(item) { return knownSetNames[normalizeMatchKey_(item.bundle)]; }).length,
+      loadedBundles: bundleSummary.filter(function(item) {
+        return item.matched && knownSetNames[normalizeMatchKey_(item.bundle)];
+      }).length,
       compositionRows: resolvedRows.length,
       unresolvedComponents: mapValues_(manualMap).length
     }
