@@ -9,7 +9,8 @@ var STATE = {
   params: null,        // текущие параметры
   xlsxReady: false,    // SheetJS загружен
   importType: null,    // 'nomenclature' | 'cost' | 'price'
-  importFileData: null // { headers, rows } из файла
+  importFileData: null, // { headers, rows } из файла
+  tables: {}           // Tabulator instances
 };
 
 // НДС/Пошлина: очередь изменений для batch-сохранения
@@ -1234,12 +1235,117 @@ function renderCostRows(results) {
 
 function renderCostTable(results) {
   if (results) STATE.calcResults = results;
-  renderCostHeaders();
-  renderCostSlicers();
-  renderCostRows(getFilteredCostResults());
+
+  if (typeof Tabulator === 'undefined') {
+    // Vanilla fallback: use old render functions
+    renderCostHeaders();
+    renderCostSlicers();
+    renderCostRows(getFilteredCostResults());
+    return;
+  }
+
+  var data = STATE.calcResults || [];
+  var columns = [];
+
+  for (var i = 0; i < COST_COLUMNS.length; i++) {
+    var col = COST_COLUMNS[i];
+    var colDef = {
+      title: col.label,
+      field: col.key,
+      headerSort: true,
+      headerFilter: col.filterable ? (col.numeric ? 'number' : 'list') : false,
+      resizable: true
+    };
+
+    if (col.key === 'name') {
+      colDef.frozen = true;
+      colDef.minWidth = 200;
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (col.key === 'flakonName' || col.key === 'category') {
+      colDef.minWidth = 120;
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (col.key === 'type') {
+      colDef.formatter = fmtTypeBadge;
+      colDef.headerFilter = 'list';
+      colDef.headerFilterParams = { values: { '': 'Все', 'Сырьё': 'Сырьё', 'Готовый товар': 'Готовый товар', 'Флакон': 'Флакон', 'Наборы': 'Наборы' } };
+      colDef.minWidth = 120;
+    } else if (col.key === 'total') {
+      colDef.formatter = fmtNumber;
+      colDef.formatterParams = { decimals: 2 };
+      colDef.hozAlign = 'right';
+      colDef.cssClass = 'col-total';
+      colDef.minWidth = 100;
+      colDef.headerFilter = false;
+    } else if (col.key === 'diff') {
+      colDef.hozAlign = 'right';
+      colDef.headerFilter = false;
+      colDef.minWidth = 90;
+      colDef.formatter = function(cell) {
+        var val = cell.getValue();
+        if (val === null || val === undefined) return '';
+        var cls = val > 0 ? 'diff-pos' : (val < 0 ? 'diff-neg' : 'diff-zero');
+        return '<span class="' + cls + '">' + (val > 0 ? '+' : '') + fmt(val) + '</span>';
+      };
+    } else if (col.key === 'diffPct') {
+      colDef.hozAlign = 'right';
+      colDef.headerFilter = false;
+      colDef.minWidth = 70;
+      colDef.formatter = function(cell) {
+        var row = cell.getRow().getData();
+        if (!row.cost1C || row.cost1C === 0) return '—';
+        var val = row.diffPct;
+        var cls = row.diff > 0 ? 'diff-pos' : (row.diff < 0 ? 'diff-neg' : 'diff-zero');
+        return '<span class="' + cls + '">' + (val * 100).toFixed(1) + '%</span>';
+      };
+    } else if (col.numeric) {
+      colDef.formatter = fmtNumber;
+      colDef.formatterParams = { decimals: 2 };
+      colDef.hozAlign = 'right';
+      colDef.minWidth = 85;
+      colDef.headerFilter = false;
+      colDef.cellClick = function(e, cell) {
+        var val = cell.getValue();
+        if (val !== null && val !== undefined && parseFloat(val) === 0) {
+          cell.getElement().classList.add('zero-val');
+        }
+      };
+    }
+
+    columns.push(colDef);
+  }
+
+  if (STATE.tables.cost) {
+    STATE.tables.cost.replaceData(data);
+    return;
+  }
+
+  STATE.tables.cost = createTable('cost-table-container', columns, data, {
+    height: '68vh',
+    layout: 'fitDataFill',
+    frozenRows: 0,
+    placeholder: 'Выполните расчёт для отображения результатов',
+    rowFormatter: function(row) {
+      var d = row.getData();
+      var cells = row.getCells();
+      for (var i = 0; i < cells.length; i++) {
+        var field = cells[i].getColumn().getField();
+        if (field !== 'name' && field !== 'flakonName' && field !== 'category' && field !== 'type') {
+          var val = cells[i].getValue();
+          if (val !== null && val !== undefined && parseFloat(val) === 0 && field !== 'diff' && field !== 'diffPct') {
+            cells[i].getElement().classList.add('zero-val');
+          }
+        }
+      }
+    }
+  });
 }
 
 function filterCostTable() {
+  // Tabulator handles filtering via built-in headerFilter
+  if (STATE.tables.cost) return;
+  // Vanilla fallback
   renderCostRows(getFilteredCostResults());
 }
 
@@ -1492,6 +1598,7 @@ function esc(s) {
 window.addEventListener('load', function() {
   loadExportData();
   loadParamsUI();
+  initIcons();
 });
 
 // ============================================================
@@ -2598,6 +2705,7 @@ function showTab(tabId) {
     syncCalcParamsFromParams(STATE.params || getParamsFromUI());
   });
   if (tabId === 'verify') populateVerifySelect();
+  initIcons();
 }
 
 function loadExportData() {

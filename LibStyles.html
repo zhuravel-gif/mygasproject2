@@ -1,0 +1,180 @@
+<!-- CDN: Tabulator -->
+<link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator_semanticui.min.css" rel="stylesheet">
+
+<!-- CDN: Toastify -->
+<link href="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.css" rel="stylesheet">
+
+<!-- CDN: SweetAlert2 -->
+<link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+
+<!-- CDN: Tippy.js theme -->
+<link href="https://unpkg.com/tippy.js@6/themes/light-border.css" rel="stylesheet">
+
+<style>
+/* ── Tabulator theme overrides ── */
+.tabulator {
+  border: 1px solid var(--border) !important;
+  border-radius: 14px !important;
+  overflow: hidden;
+  font-size: 12px !important;
+  font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, sans-serif !important;
+  background: var(--panel) !important;
+}
+
+.tabulator .tabulator-header {
+  background: var(--bg-accent) !important;
+  border-bottom: 1px solid var(--border-strong) !important;
+  color: var(--muted-strong) !important;
+  font-weight: 700 !important;
+}
+
+.tabulator .tabulator-header .tabulator-col {
+  background: transparent !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+.tabulator .tabulator-header .tabulator-col:hover {
+  background: var(--primary-soft) !important;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable .tabulator-col-sorter {
+  color: var(--muted) !important;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input:focus {
+  border-color: var(--primary) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15) !important;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter select {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  background: var(--panel) !important;
+}
+
+.tabulator .tabulator-tableholder .tabulator-table .tabulator-row {
+  border-bottom: 1px solid #eef1f4 !important;
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  min-height: 32px !important;
+}
+
+.tabulator .tabulator-tableholder .tabulator-table .tabulator-row:hover {
+  background: rgba(59, 130, 246, 0.03) !important;
+}
+
+.tabulator .tabulator-tableholder .tabulator-table .tabulator-row .tabulator-cell {
+  border-right: 1px solid #f0f2f5 !important;
+  padding: 6px 9px !important;
+}
+
+.tabulator .tabulator-tableholder .tabulator-table .tabulator-row .tabulator-cell.tabulator-editing input {
+  border: 1px solid var(--primary) !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15) !important;
+  font-size: 12px !important;
+  text-align: right !important;
+}
+
+.tabulator .tabulator-footer {
+  background: var(--bg-accent) !important;
+  border-top: 1px solid var(--border) !important;
+  color: var(--muted-strong) !important;
+  padding: 6px 12px !important;
+}
+
+/* Frozen column styling */
+.tabulator .tabulator-row .tabulator-frozen {
+  background: var(--panel) !important;
+  border-right: 2px solid var(--border-strong) !important;
+}
+
+.tabulator .tabulator-row:hover .tabulator-frozen {
+  background: rgba(59, 130, 246, 0.03) !important;
+}
+
+.tabulator .tabulator-header .tabulator-frozen {
+  background: var(--bg-accent) !important;
+  border-right: 2px solid var(--border-strong) !important;
+}
+
+/* Calculated column styling */
+.tabulator .calc-col {
+  background: #eef4ff !important;
+  color: var(--primary-strong) !important;
+  font-weight: 600 !important;
+}
+
+/* Zero value styling */
+.tabulator .zero-val {
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+  font-weight: 600 !important;
+}
+
+/* Total column styling */
+.tabulator .col-total {
+  background: var(--primary-soft) !important;
+  font-weight: 700 !important;
+}
+
+/* Placeholder */
+.tabulator .tabulator-placeholder {
+  color: var(--muted) !important;
+  font-size: 13px !important;
+  padding: 32px 16px !important;
+}
+
+/* SweetAlert2 overrides */
+.swal2-popup {
+  font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, sans-serif !important;
+  border-radius: 16px !important;
+}
+
+.swal2-confirm {
+  background: var(--primary) !important;
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+}
+
+.swal2-cancel {
+  border-radius: 10px !important;
+}
+
+/* Toastify overrides */
+.toastify {
+  font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, sans-serif !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12) !important;
+  padding: 10px 16px !important;
+  font-size: 13px !important;
+}
+
+/* Tippy overrides */
+.tippy-box[data-theme~='app'] {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tippy-box[data-theme~='app'] .tippy-arrow {
+  color: var(--panel);
+}
+</style>

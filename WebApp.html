@@ -3,19 +3,20 @@
 <head>
   <base target="_top">
   <?!= include('Styles') ?>
+  <?!= include('LibStyles') ?>
 </head>
 <body>
 
 <nav class="navbar">
   <div class="nav-brand">Калькулятор себестоимости</div>
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showTab('params')">Параметры</button>
-    <button class="nav-tab" onclick="showTab('export')">Импорт данных</button>
-    <button class="nav-tab" onclick="showTab('flakons')">Флаконы</button>
-    <button class="nav-tab" onclick="showTab('bundles')">Наборы</button>
-    <button class="nav-tab" onclick="showTab('cost')">Себестоимость</button>
-    <button class="nav-tab" onclick="showTab('calc')">Калькулятор</button>
-    <button class="nav-tab" onclick="showTab('verify')">Проверка</button>
+    <button class="nav-tab active" onclick="showTab('params')"><i data-lucide="settings"></i> Параметры</button>
+    <button class="nav-tab" onclick="showTab('export')"><i data-lucide="upload"></i> Импорт данных</button>
+    <button class="nav-tab" onclick="showTab('flakons')"><i data-lucide="flask-round"></i> Флаконы</button>
+    <button class="nav-tab" onclick="showTab('bundles')"><i data-lucide="package"></i> Наборы</button>
+    <button class="nav-tab" onclick="showTab('cost')"><i data-lucide="calculator"></i> Себестоимость</button>
+    <button class="nav-tab" onclick="showTab('calc')"><i data-lucide="sliders-horizontal"></i> Калькулятор</button>
+    <button class="nav-tab" onclick="showTab('verify')"><i data-lucide="check-circle"></i> Проверка</button>
   </div>
 </nav>
 
@@ -39,7 +40,7 @@
         <h3 id="import-modal-title">Импорт файла</h3>
         <p id="import-modal-subtitle" class="hint"></p>
       </div>
-      <button class="btn btn-icon" onclick="closeImportModal()">×</button>
+      <button class="btn btn-icon" onclick="closeImportModal()"><i data-lucide="x"></i></button>
     </div>
 
     <div class="modal-body">
@@ -176,8 +177,8 @@
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" onclick="saveParamsUI()">Сохранить параметры</button>
-        <button class="btn btn-secondary" onclick="loadParamsUI()">Загрузить сохранённые</button>
+        <button class="btn btn-primary" onclick="saveParamsUI()"><i data-lucide="save"></i> Сохранить параметры</button>
+        <button class="btn btn-secondary" onclick="loadParamsUI()"><i data-lucide="download"></i> Загрузить сохранённые</button>
       </div>
       <div id="params-status" class="status"></div>
     </div>
@@ -202,13 +203,13 @@
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" onclick="startImport('nomenclature')">Импорт из 1С номенклатуры</button>
-        <button class="btn btn-secondary" onclick="startImport('cost')">Импорт себестоимости текущей</button>
-        <button class="btn btn-secondary" onclick="startImport('supplier')">Импорт цены поставщика</button>
-        <button class="btn btn-secondary" onclick="startImport('bundles')">Импорт комплектаций наборов</button>
-        <button class="btn btn-outline" onclick="loadExportData()">Обновить таблицу</button>
-        <button class="btn btn-outline" onclick="saveRateEditsUI()">Сохранить ручные правки таблицы</button>
-        <button class="btn btn-outline" onclick="exportCSV()">Экспорт в CSV</button>
+        <button class="btn btn-primary" onclick="startImport('nomenclature')"><i data-lucide="file-up"></i> Импорт из 1С номенклатуры</button>
+        <button class="btn btn-secondary" onclick="startImport('cost')"><i data-lucide="file-input"></i> Импорт себестоимости текущей</button>
+        <button class="btn btn-secondary" onclick="startImport('supplier')"><i data-lucide="file-input"></i> Импорт цены поставщика</button>
+        <button class="btn btn-secondary" onclick="startImport('bundles')"><i data-lucide="file-input"></i> Импорт комплектаций наборов</button>
+        <button class="btn btn-outline" onclick="loadExportData()"><i data-lucide="refresh-cw"></i> Обновить таблицу</button>
+        <button class="btn btn-outline" onclick="saveRateEditsUI()"><i data-lucide="save"></i> Сохранить ручные правки таблицы</button>
+        <button class="btn btn-outline" onclick="exportCSV()"><i data-lucide="file-spreadsheet"></i> Экспорт в CSV</button>
       </div>
 
       <div id="export-status" class="status"></div>
@@ -253,9 +254,9 @@
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" onclick="saveFlakonDataUI()">Сохранить</button>
-        <button class="btn btn-outline" onclick="recalculateFlakonsUI()">Пересчитать</button>
-        <button class="btn btn-secondary" onclick="loadFlakonsUI()">Обновить</button>
+        <button class="btn btn-primary" onclick="saveFlakonDataUI()"><i data-lucide="save"></i> Сохранить</button>
+        <button class="btn btn-outline" onclick="recalculateFlakonsUI()"><i data-lucide="calculator"></i> Пересчитать</button>
+        <button class="btn btn-secondary" onclick="loadFlakonsUI()"><i data-lucide="refresh-cw"></i> Обновить</button>
       </div>
       <div id="flakons-status" class="status"></div>
     </div>
@@ -303,8 +304,8 @@
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" onclick="saveBundleDataUI()">Сохранить</button>
-        <button class="btn btn-secondary" onclick="loadBundlesUI()">Обновить</button>
+        <button class="btn btn-primary" onclick="saveBundleDataUI()"><i data-lucide="save"></i> Сохранить</button>
+        <button class="btn btn-secondary" onclick="loadBundlesUI()"><i data-lucide="refresh-cw"></i> Обновить</button>
       </div>
       <div id="bundles-status" class="status"></div>
       <div id="bundles-stats" class="stats-bar"></div>
@@ -375,33 +376,16 @@
     <div class="card section-card cost-card">
       <h2>Себестоимость позиций</h2>
       <div class="actions">
-        <button class="btn btn-primary" onclick="runCalculation()">Рассчитать</button>
-        <button class="btn btn-outline" onclick="exportCostExcel()">Выгрузить в Excel</button>
-        <button class="btn btn-outline" onclick="saveResultsUI()">Записать результаты на лист</button>
+        <button class="btn btn-primary" onclick="runCalculation()"><i data-lucide="play"></i> Рассчитать</button>
+        <button class="btn btn-outline" onclick="exportCostExcel()"><i data-lucide="file-spreadsheet"></i> Выгрузить в Excel</button>
+        <button class="btn btn-outline" onclick="saveResultsUI()"><i data-lucide="save"></i> Записать результаты на лист</button>
       </div>
       <div id="cost-status" class="status"></div>
       <div id="cost-stats" class="stats-bar"></div>
     </div>
 
     <div class="card section-card table-card cost-table-card">
-      <div class="filter-row">
-        <input id="cost-search" type="text" class="search-input" placeholder="Поиск..." oninput="filterCostTable()">
-        <select id="cost-type-filter" onchange="filterCostTable()">
-          <option value="">Все типы</option>
-          <option value="Сырьё">Сырьё</option>
-          <option value="Готовый товар">Готовый товар</option>
-          <option value="Флакон">Флакон</option>
-          <option value="Наборы">Наборы</option>
-        </select>
-      </div>
-      <div id="cost-slicers" class="export-slicers"></div>
-
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr id="cost-thead"></tr></thead>
-          <tbody id="cost-tbody"></tbody>
-        </table>
-      </div>
+      <div id="cost-table-container"></div>
     </div>
   </div>
 
@@ -542,6 +526,7 @@
 </main>
 
 <?!= include('SheetJsLib') ?>
+<?!= include('LibScripts') ?>
 <?!= include('Scripts') ?>
 
 </body>
