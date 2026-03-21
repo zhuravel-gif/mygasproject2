@@ -602,6 +602,52 @@ body.modal-open {
   line-height: 1.5;
 }
 
+.bundle-specs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.bundle-spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.bundle-spec-item label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+
+.bundle-spec-item select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.bundle-active-row td {
+  background: #f6fbf8;
+}
+
+.bundle-manual-cost {
+  background: var(--warning-soft) !important;
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.muted-cell {
+  color: var(--muted);
+  text-align: center;
+  padding: 14px 10px !important;
+}
+
 #tab-export .card {
   width: 100%;
 }

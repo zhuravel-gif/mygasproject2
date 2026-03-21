@@ -5,6 +5,7 @@
 var CFG = {
   DATA: '1cData',
   FLAKONS: 'Флаконы',
+  BUNDLES: 'Наборы',
   BASIS: 'basis',
   RESULTS: 'Результаты',
   META: '__meta',
@@ -42,6 +43,7 @@ var IMPORT_META_KEYS = {
   nomenclature: 'mapping.nomenclature',
   cost: 'mapping.cost',
   supplier: 'mapping.supplier',
+  bundles: 'mapping.bundles',
   rateDefaults: 'defaults.rate'
 };
 
@@ -51,7 +53,8 @@ function getImportSettings() {
     mappings: {
       nomenclature: getSavedImportMapping_('nomenclature'),
       cost: getSavedImportMapping_('cost'),
-      supplier: getSavedImportMapping_('supplier')
+      supplier: getSavedImportMapping_('supplier'),
+      bundles: getSavedImportMapping_('bundles')
     },
     rateDefaults: {
       nds: params.importNds,
@@ -349,6 +352,270 @@ function saveFlakonData(flakons) {
   }
 
   return { success: true, count: normalized.length, flakons: normalized };
+}
+
+function importBundleCompositions(payload) {
+  if (!payload || !payload.rows || payload.rows.length === 0) {
+    return { success: false, message: 'Нет строк для импорта комплектаций наборов.' };
+  }
+
+  var existingRows = getStoredBundleRows_();
+  var manualCostMap = {};
+  var activeSpecMap = {};
+  var i;
+
+  for (i = 0; i < existingRows.length; i++) {
+    var existing = existingRows[i];
+    if (hasValue_(existing.manualCost)) {
+      manualCostMap[normalizeMatchKey_(existing.component)] = toNumber_(existing.manualCost, 0);
+    }
+    if (existing.active && existing.bundle && existing.specification) {
+      activeSpecMap[existing.bundle] = existing.specification;
+    }
+  }
+
+  var dedupeMap = {};
+  var specOrder = {};
+  for (i = 0; i < payload.rows.length; i++) {
+    var item = payload.rows[i] || {};
+    var component = String(item.component || '').trim();
+    var bundle = String(item.bundle || '').trim();
+    var specification = String(item.specification || '').trim();
+    if (!component || !bundle || !specification) continue;
+
+    var quantity = toNumber_(item.quantity, 1);
+    if (!hasValue_(quantity)) quantity = 1;
+
+    var dedupeKey = [bundle, specification, component].join('||');
+    if (!dedupeMap[dedupeKey]) {
+      dedupeMap[dedupeKey] = {
+        component: component,
+        bundle: bundle,
+        specification: specification,
+        quantity: 0,
+        active: false,
+        manualCost: hasValue_(manualCostMap[normalizeMatchKey_(component)]) ? manualCostMap[normalizeMatchKey_(component)] : ''
+      };
+      if (!specOrder[bundle]) specOrder[bundle] = [];
+      if (specOrder[bundle].indexOf(specification) === -1) specOrder[bundle].push(specification);
+    }
+    dedupeMap[dedupeKey].quantity += toNumber_(quantity, 0);
+  }
+
+  var rows = mapValues_(dedupeMap);
+  for (i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var activeSpec = activeSpecMap[row.bundle] || (specOrder[row.bundle] && specOrder[row.bundle][0]) || '';
+    row.active = row.specification === activeSpec;
+  }
+
+  writeBundleSheetRows_(rows);
+  refreshBundleSheetComputed_();
+  saveImportMapping_('bundles', payload.mapping || null);
+
+  var bundleData = getBundleData();
+  return {
+    success: true,
+    message: 'Комплектации наборов импортированы: ' + rows.length + ' строк.',
+    count: rows.length,
+    stats: bundleData.stats
+  };
+}
+
+function getBundleData() {
+  if (typeof buildBundleUiState_ === 'function') {
+    return buildBundleUiState_();
+  }
+
+  return {
+    rows: getStoredBundleRows_(),
+    bundles: [],
+    manualItems: [],
+    stats: getBundleStats()
+  };
+}
+
+function getBundleStats() {
+  var totalSets = 0;
+  var linked = {};
+  var knownSetNames = {};
+  var data = getData();
+  var i;
+
+  for (i = 0; i < data.rows.length; i++) {
+    if (String(data.rows[i][11] || '').trim() === 'Да') {
+      totalSets++;
+      knownSetNames[String(data.rows[i][0] || '').trim()] = true;
+    }
+  }
+
+  var bundleRows = getStoredBundleRows_();
+  for (i = 0; i < bundleRows.length; i++) {
+    if (bundleRows[i].bundle && knownSetNames[bundleRows[i].bundle]) linked[bundleRows[i].bundle] = true;
+  }
+
+  return {
+    totalSets: totalSets,
+    loadedBundles: Object.keys(linked).length,
+    compositionRows: bundleRows.length
+  };
+}
+
+function saveBundleData(payload) {
+  payload = payload || {};
+  var existingRows = getStoredBundleRows_();
+  if (!existingRows.length) {
+    return { success: false, message: 'Сначала импортируйте комплектации наборов.' };
+  }
+
+  var activeSpecs = payload.activeSpecs || {};
+  var manualCostsRaw = payload.manualCosts || {};
+  var manualCosts = {};
+  var i;
+
+  for (var manualKey in manualCostsRaw) {
+    if (!manualCostsRaw.hasOwnProperty(manualKey)) continue;
+    manualCosts[normalizeMatchKey_(manualKey)] = manualCostsRaw[manualKey];
+  }
+
+  for (i = 0; i < existingRows.length; i++) {
+    var row = existingRows[i];
+    var activeSpec = activeSpecs.hasOwnProperty(row.bundle) ? String(activeSpecs[row.bundle] || '').trim() : '';
+    if (activeSpec) {
+      row.active = row.specification === activeSpec;
+    }
+
+    var componentKey = normalizeMatchKey_(row.component);
+    if (manualCosts.hasOwnProperty(componentKey)) {
+      row.manualCost = manualCosts[componentKey] === '' ? '' : toNumber_(manualCosts[componentKey], 0);
+    }
+  }
+
+  writeBundleSheetRows_(existingRows);
+  refreshBundleSheetComputed_();
+  var data = getBundleData();
+  data.success = true;
+  data.message = 'Наборы сохранены.';
+  return data;
+}
+
+function getBundleHeaders_() {
+  return [
+    'Компонент',
+    'Набор',
+    'Спецификация',
+    'Количество',
+    'Активная',
+    'Себес 1С',
+    'Себестоимость расчёт',
+    'Ручная стоимость',
+    'Используемая стоимость',
+    'Источник стоимости'
+  ];
+}
+
+function getStoredBundleRows_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.BUNDLES);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0] || [];
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    var item = normalizeStoredBundleRow_(data[i], headers);
+    if (!item.bundle || !item.component || !item.specification) continue;
+    rows.push(item);
+  }
+  return rows;
+}
+
+function normalizeStoredBundleRow_(row) {
+  return {
+    component: String(row[0] || '').trim(),
+    bundle: String(row[1] || '').trim(),
+    specification: String(row[2] || '').trim(),
+    quantity: toNumber_(row[3], 1),
+    active: String(row[4] || '').trim() === 'Да',
+    cost1C: toNumber_(row[5], 0),
+    calcCost: toNumber_(row[6], 0),
+    manualCost: row[7] === '' || row[7] === null || row[7] === undefined ? '' : toNumber_(row[7], 0),
+    usedCost: toNumber_(row[8], 0),
+    source: String(row[9] || '').trim()
+  };
+}
+
+function writeBundleSheetRows_(rows) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.BUNDLES) || ss.insertSheet(CFG.BUNDLES);
+  var headers = getBundleHeaders_();
+  var values = [headers];
+  var i;
+
+  for (i = 0; i < rows.length; i++) {
+    values.push([
+      rows[i].component || '',
+      rows[i].bundle || '',
+      rows[i].specification || '',
+      toNumber_(rows[i].quantity, 1),
+      rows[i].active ? 'Да' : '',
+      hasValue_(rows[i].cost1C) ? toNumber_(rows[i].cost1C, 0) : '',
+      hasValue_(rows[i].calcCost) ? toNumber_(rows[i].calcCost, 0) : '',
+      rows[i].manualCost === '' ? '' : toNumber_(rows[i].manualCost, 0),
+      hasValue_(rows[i].usedCost) ? toNumber_(rows[i].usedCost, 0) : '',
+      rows[i].source || ''
+    ]);
+  }
+
+  sheet.clear();
+  sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4a86c8')
+    .setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+
+  if (values.length > 1) {
+    sheet.getRange(2, 4, values.length - 1, 5).setNumberFormat('#,##0.00');
+  }
+}
+
+function refreshBundleSheetComputed_() {
+  if (typeof buildBundleUiState_ !== 'function') return;
+
+  var data = buildBundleUiState_();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.BUNDLES) || ss.insertSheet(CFG.BUNDLES);
+  var headers = getBundleHeaders_();
+  var rows = [headers];
+
+  for (var i = 0; i < data.rows.length; i++) {
+    var item = data.rows[i];
+    rows.push([
+      item.component || '',
+      item.bundle || '',
+      item.specification || '',
+      toNumber_(item.quantity, 1),
+      item.active ? 'Да' : '',
+      toNumber_(item.cost1C, 0),
+      toNumber_(item.calcCost, 0),
+      item.manualCost === '' ? '' : toNumber_(item.manualCost, 0),
+      toNumber_(item.usedCost, 0),
+      item.source || ''
+    ]);
+  }
+
+  sheet.clear();
+  sheet.getRange(1, 1, rows.length, headers.length).setValues(rows);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4a86c8')
+    .setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+
+  if (rows.length > 1) {
+    sheet.getRange(2, 4, rows.length - 1, 5).setNumberFormat('#,##0.00');
+  }
 }
 
 function saveResults(results) {
