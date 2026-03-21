@@ -217,20 +217,7 @@
     </div>
 
     <div class="card section-card table-card import-table-card">
-      <input
-        id="export-search"
-        type="text"
-        class="search-input"
-        placeholder="Поиск по наименованию или артикулу..."
-        oninput="filterExportTable()"
-      >
-      <div id="export-slicers" class="export-slicers"></div>
-      <div class="table-wrap">
-        <table id="export-table" class="data-table">
-          <thead><tr id="export-thead"></tr></thead>
-          <tbody id="export-tbody"></tbody>
-        </table>
-      </div>
+      <div id="export-table-container"></div>
     </div>
   </div>
 
@@ -262,26 +249,7 @@
     </div>
 
     <div class="card section-card table-card flakon-table-card">
-      <div class="table-wrap">
-        <table class="data-table editable">
-          <thead>
-            <tr>
-              <th>Флакон</th>
-              <th>Объём</th>
-              <th>Вес</th>
-              <th>Цена поставщика</th>
-              <th>НДС</th>
-              <th>Пошлина</th>
-              <th>Этикетка</th>
-              <th class="calc-col-head">Цена флакона в руб.</th>
-              <th class="calc-col-head">Доставка в руб.</th>
-              <th class="calc-col-head">НДС+пошлина</th>
-              <th class="calc-col-head">Себестоимость флакона</th>
-            </tr>
-          </thead>
-          <tbody id="flakons-tbody"></tbody>
-        </table>
-      </div>
+      <div id="flakons-table-container"></div>
     </div>
   </div>
 
@@ -313,62 +281,16 @@
 
     <div class="card section-card table-card bundle-spec-card">
       <h3 class="section-title">Активные спецификации наборов</h3>
-      <div class="filter-row">
-        <input id="bundle-spec-search" type="text" class="search-input" placeholder="Поиск по набору..." oninput="filterBundleSpecTable()">
-        <select id="bundle-spec-match-filter" onchange="filterBundleSpecTable()">
-          <option value="">Все статусы</option>
-          <option value="matched">С комплектацией</option>
-          <option value="missing">Без комплектации</option>
-        </select>
-      </div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr id="bundle-spec-thead"></tr></thead>
-          <tbody id="bundle-spec-tbody"></tbody>
-        </table>
-      </div>
+      <div id="bundle-spec-container"></div>
     </div>
 
     <div class="card section-card table-card bundle-manual-card">
       <h3 class="section-title">Ручные стоимости компонентов без найденной себестоимости</h3>
-      <div class="table-wrap">
-        <table class="data-table editable">
-          <thead>
-            <tr>
-              <th>Компонент</th>
-              <th>Использований</th>
-              <th>Ручная стоимость, ₽</th>
-            </tr>
-          </thead>
-          <tbody id="bundle-manual-tbody"></tbody>
-        </table>
-      </div>
+      <div id="bundle-manual-container"></div>
     </div>
 
     <div class="card section-card table-card bundle-table-card">
-      <div class="filter-row">
-        <input id="bundle-rows-search" type="text" class="search-input" placeholder="Поиск по компоненту, набору или спецификации..." oninput="filterBundleRowsTable()">
-        <select id="bundle-rows-bundle-filter" onchange="filterBundleRowsTable()">
-          <option value="">Все наборы</option>
-        </select>
-        <select id="bundle-rows-spec-filter" onchange="filterBundleRowsTable()">
-          <option value="">Все спецификации</option>
-        </select>
-        <select id="bundle-rows-source-filter" onchange="filterBundleRowsTable()">
-          <option value="">Все источники</option>
-        </select>
-        <select id="bundle-rows-active-filter" onchange="filterBundleRowsTable()">
-          <option value="">Все строки</option>
-          <option value="active">Только активные</option>
-          <option value="inactive">Только неактивные</option>
-        </select>
-      </div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr id="bundle-rows-thead"></tr></thead>
-          <tbody id="bundles-tbody"></tbody>
-        </table>
-      </div>
+      <div id="bundle-rows-container"></div>
     </div>
   </div>
 
