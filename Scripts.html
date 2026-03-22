@@ -543,9 +543,25 @@ function renderExportTable(data) {
     tableData.push(obj);
   }
 
-  // Build columns from headers
+  // Priority column order: Наименование, Артикул, Артикул ВБ, Категория,
+  // Объём тары, Товарная группа 1, Цена поставщика, НДС, Пошлина, затем остальные
+  var EXPORT_COL_ORDER = [0, 1, 2, 3, 4, 5, EXPORT_PRICE_COL, EXPORT_NDS_COL, EXPORT_TAX_COL];
+  var orderedIndices = [];
+  var seen = {};
+  for (var p = 0; p < EXPORT_COL_ORDER.length; p++) {
+    if (EXPORT_COL_ORDER[p] < headers.length) {
+      orderedIndices.push(EXPORT_COL_ORDER[p]);
+      seen[EXPORT_COL_ORDER[p]] = true;
+    }
+  }
+  for (var r = 0; r < headers.length; r++) {
+    if (!seen[r]) orderedIndices.push(r);
+  }
+
+  // Build columns in the specified order
   var columns = [];
-  for (var c = 0; c < headers.length; c++) {
+  for (var idx = 0; idx < orderedIndices.length; idx++) {
+    var c = orderedIndices[idx];
     var colDef = {
       title: String(headers[c] || ''),
       field: 'col' + c,
@@ -587,24 +603,22 @@ function renderExportTable(data) {
     } else {
       // Auto-detect numeric columns
       colDef.minWidth = 80;
-      if (c > 0) {
-        colDef.formatter = function(cell) {
-          var val = cell.getValue();
-          if (val === null || val === undefined || val === '') return '';
-          var num = parseFloat(val);
-          if (isNaN(num)) return String(val);
-          return num % 1 === 0 ? String(num) : num.toFixed(2);
-        };
-        colDef.hozAlign = 'right';
-      }
+      colDef.formatter = function(cell) {
+        var val = cell.getValue();
+        if (val === null || val === undefined || val === '') return '';
+        var num = parseFloat(val);
+        if (isNaN(num)) return String(val);
+        return num % 1 === 0 ? String(num) : num.toFixed(2);
+      };
+      colDef.hozAlign = 'right';
     }
 
     columns.push(colDef);
   }
 
   if (STATE.tables.export) {
-    STATE.tables.export.replaceData(tableData);
-    return;
+    STATE.tables.export.destroy();
+    STATE.tables.export = null;
   }
 
   STATE.tables.export = createTable('export-table-container', columns, tableData, {
@@ -2274,8 +2288,8 @@ window.addEventListener('load', function() {
 // ============================================================
 var EXPORT_SCHEMA_COLS = 18;
 var EXPORT_STICKY_COLS = 4;
-var EXPORT_PRICE_COL = 15;
-var EXPORT_PRIORITY_ORDER = [0, 1, 2, 3, 13, 14, 15, 16, 17];
+// EXPORT_PRICE_COL already defined above (line ~509)
+var EXPORT_PRIORITY_ORDER = [0, 1, 2, 3, 4, 5, 15, 16, 17];
 var EXPORT_SLICER_EXCLUDED = {
   0: true,   // Номенклатура
   1: true,   // Артикул

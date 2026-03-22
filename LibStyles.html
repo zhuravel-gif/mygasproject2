@@ -96,19 +96,30 @@
   padding: 6px 12px !important;
 }
 
-/* Frozen column styling */
+/* Frozen column styling — solid bg + z-index to prevent text bleed-through */
 .tabulator .tabulator-row .tabulator-frozen {
-  background: var(--panel) !important;
+  background: #ffffff !important;
   border-right: 2px solid var(--border-strong) !important;
+  z-index: 11 !important;
+  position: sticky !important;
 }
 
 .tabulator .tabulator-row:hover .tabulator-frozen {
-  background: rgba(59, 130, 246, 0.03) !important;
+  background: #f5f8ff !important;
 }
 
 .tabulator .tabulator-header .tabulator-frozen {
-  background: var(--bg-accent) !important;
+  background: var(--bg-accent, #f1f5f9) !important;
   border-right: 2px solid var(--border-strong) !important;
+  z-index: 12 !important;
+  position: sticky !important;
+}
+
+/* Drop shadow on frozen column edge for visual separation */
+.tabulator .tabulator-row .tabulator-frozen:last-of-type,
+.tabulator .tabulator-header .tabulator-frozen:last-of-type {
+  box-shadow: 4px 0 8px rgba(15, 23, 42, 0.06) !important;
+  clip-path: inset(0 -8px 0 0) !important;
 }
 
 /* Calculated column styling */
