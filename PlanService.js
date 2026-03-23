@@ -101,28 +101,57 @@ function openPlanSpreadsheet_(value) {
   throw new Error(details.join(' | '));
 }
 
+function getPlanSheetType_(sheet) {
+  try {
+    var type = sheet && sheet.getType ? sheet.getType() : '';
+    return type ? String(type) : 'GRID';
+  } catch (err) {
+    return 'GRID';
+  }
+}
+
+function buildPlanSourceSheetInfo_(sheet) {
+  var info = {
+    name: sheet.getName(),
+    type: getPlanSheetType_(sheet),
+    rowCount: 0,
+    colCount: 0,
+    previewRows: [],
+    previewError: '',
+    selectable: true
+  };
+
+  // Data source sheets can throw on generic sheet range/size operations.
+  // We keep them visible in the list but do not let them break the whole import dialog.
+  if (info.type === 'DATASOURCE') {
+    info.selectable = false;
+    info.previewError = 'Лист типа DATASOURCE не поддерживается для импорта плана. Выберите обычный лист Google Sheets.';
+    return info;
+  }
+
+  try {
+    info.rowCount = sheet.getLastRow();
+    info.colCount = sheet.getLastColumn();
+    if (info.rowCount > 0 && info.colCount > 0) {
+      info.previewRows = sheet
+        .getRange(1, 1, Math.min(info.rowCount, PLAN_COST_CFG.PREVIEW_ROWS), Math.min(info.colCount, PLAN_COST_CFG.PREVIEW_COLS))
+        .getDisplayValues();
+    }
+  } catch (err) {
+    info.selectable = false;
+    info.previewError = 'Не удалось прочитать лист: ' + err.message;
+  }
+
+  return info;
+}
+
 function getPlanImportSource(url) {
   var cleanUrl = String(url || '').trim();
   if (!cleanUrl) return { success: false, message: 'Укажите ссылку на Google Sheets.' };
 
   try {
     var ss = openPlanSpreadsheet_(cleanUrl);
-    var sheets = ss.getSheets().map(function(sheet) {
-      var lastRow = sheet.getLastRow();
-      var lastCol = sheet.getLastColumn();
-      var previewRows = [];
-      if (lastRow > 0 && lastCol > 0) {
-        previewRows = sheet
-          .getRange(1, 1, Math.min(lastRow, PLAN_COST_CFG.PREVIEW_ROWS), Math.min(lastCol, PLAN_COST_CFG.PREVIEW_COLS))
-          .getDisplayValues();
-      }
-      return {
-        name: sheet.getName(),
-        rowCount: lastRow,
-        colCount: lastCol,
-        previewRows: previewRows
-      };
-    });
+    var sheets = ss.getSheets().map(buildPlanSourceSheetInfo_);
 
     return {
       success: true,
