@@ -54,6 +54,34 @@ var PLAN_COL = {
   NOTE: 19
 };
 
+function buildPlanDiagnostic_(err) {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (err.stack) return String(err.stack);
+  if (err.message) return String(err.message);
+  try {
+    return JSON.stringify(err);
+  } catch (jsonErr) {
+    return String(err);
+  }
+}
+
+function planErrorResponse_(message, diagnostic, extra) {
+  var payload = {
+    success: false,
+    message: String(message || 'Ошибка операции плана.')
+  };
+  var diagText = buildPlanDiagnostic_(diagnostic);
+  if (diagText) payload.diagnostic = diagText;
+  if (diagnostic && diagnostic.name) payload.errorName = String(diagnostic.name);
+  if (extra) {
+    for (var key in extra) {
+      if (Object.prototype.hasOwnProperty.call(extra, key)) payload[key] = extra[key];
+    }
+  }
+  return payload;
+}
+
 function extractPlanSpreadsheetId_(value) {
   var input = String(value || '').trim();
   if (!input) return '';
@@ -220,7 +248,7 @@ function buildPlanSourceSheetInfo_(sheet) {
 
 function getPlanImportSource(url) {
   var cleanUrl = String(url || '').trim();
-  if (!cleanUrl) return { success: false, message: 'Укажите ссылку на Google Sheets.' };
+  if (!cleanUrl) return planErrorResponse_('Укажите ссылку на Google Sheets.');
 
   try {
     var ss = openPlanSpreadsheet_(cleanUrl);
@@ -232,202 +260,218 @@ function getPlanImportSource(url) {
       sheets: sheets
     };
   } catch (err) {
-    return {
-      success: false,
-      message: 'Не удалось открыть Google Sheets по ссылке: ' + err.message
-    };
+    return planErrorResponse_('Не удалось открыть Google Sheets по ссылке: ' + err.message, err);
   }
 }
 
 function importPlanCosts(payload) {
-  payload = payload || {};
-  var config = normalizePlanImportConfig_(payload);
-  if (!config.spreadsheetUrl) return { success: false, message: 'Не указана ссылка на Google Sheets.' };
-  if (!config.sheetName) return { success: false, message: 'Не выбран лист источника.' };
-  if (config.headerRow < 1) return { success: false, message: 'Некорректная строка заголовков.' };
-  if (!isValidPlanImportPayload_(config)) {
-    return { success: false, message: 'Проверьте маппинг колонок и три месяца плана.' };
-  }
-
-  var externalSheet;
   try {
-    externalSheet = openPlanSpreadsheet_(config.spreadsheetUrl).getSheetByName(config.sheetName);
-  } catch (err) {
-    return { success: false, message: 'Не удалось открыть источник плана: ' + err.message };
-  }
-  if (!externalSheet) return { success: false, message: 'Лист источника не найден.' };
+    payload = payload || {};
+    var config = normalizePlanImportConfig_(payload);
+    if (!config.spreadsheetUrl) return planErrorResponse_('Не указана ссылка на Google Sheets.');
+    if (!config.sheetName) return planErrorResponse_('Не выбран лист источника.');
+    if (config.headerRow < 1) return planErrorResponse_('Некорректная строка заголовков.');
+    if (!isValidPlanImportPayload_(config)) {
+      return planErrorResponse_('Проверьте маппинг колонок и месяцы плана.');
+    }
 
-  var sourceData;
-  try {
-    sourceData = readPlanSheetSourceRows_(externalSheet, null, null);
-  } catch (err2) {
-    return { success: false, message: 'Не удалось прочитать строки источника плана: ' + err2.message };
-  }
+    var externalSheet;
+    try {
+      externalSheet = openPlanSpreadsheet_(config.spreadsheetUrl).getSheetByName(config.sheetName);
+    } catch (err) {
+      return planErrorResponse_('Не удалось открыть источник плана: ' + err.message, err);
+    }
+    if (!externalSheet) return planErrorResponse_('Лист источника не найден.');
 
-  if (sourceData.headerRowLocked) config.headerRow = 1;
-  var sourceRows = sourceData.rows || [];
-  var lastRow = sourceRows.length;
-  var lastCol = sourceRows[0] ? sourceRows[0].length : 0;
-  if (lastRow < config.headerRow || lastCol < 1) {
-    return { success: false, message: 'В выбранном листе нет данных для импорта.' };
-  }
+    var sourceData;
+    try {
+      sourceData = readPlanSheetSourceRows_(externalSheet, null, null);
+    } catch (err2) {
+      return planErrorResponse_('Не удалось прочитать строки источника плана: ' + err2.message, err2);
+    }
 
-  var headers = buildNormalizedHeaders_(sourceRows[config.headerRow - 1] || []);
-  var dataRows = sourceRows.slice(config.headerRow).filter(isRowWithValues_);
-  if (!dataRows.length) {
-    return { success: false, message: 'После строки заголовков не найдено строк плана.' };
-  }
+    if (sourceData.headerRowLocked) config.headerRow = 1;
+    var sourceRows = sourceData.rows || [];
+    var lastRow = sourceRows.length;
+    var lastCol = sourceRows[0] ? sourceRows[0].length : 0;
+    if (lastRow < config.headerRow || lastCol < 1) {
+      return planErrorResponse_('В выбранном листе нет данных для импорта.');
+    }
 
-  var dataObj = getData();
-  var dataRowsCurrent = dataObj.rows || [];
-  var matchMaps = buildPlanMatchMaps_(dataRowsCurrent);
-  var flakonMap = buildFlakonMap(getFlakonList());
-  var aggregated = {};
-  var processed = 0;
-  var matchedByArticle = 0;
-  var matchedByName = 0;
+    var headers = buildNormalizedHeaders_(sourceRows[config.headerRow - 1] || []);
+    var dataRows = sourceRows.slice(config.headerRow).filter(isRowWithValues_);
+    if (!dataRows.length) {
+      return planErrorResponse_('После строки заголовков не найдено строк плана.');
+    }
 
-  for (var i = 0; i < dataRows.length; i++) {
-    var row = dataRows[i];
-    var planName = getPlanCellString_(row, config.mapping.name);
-    var planArticleWb = getPlanCellString_(row, config.mapping.articleWb);
-    var monthQtys = config.months.map(function(month) {
-      return toPlanNumber_(isValidIndex_(month.column, headers.length) ? row[month.column] : '');
-    });
+    var dataObj = getData();
+    var dataRowsCurrent = dataObj.rows || [];
+    var matchMaps = buildPlanMatchMaps_(dataRowsCurrent);
+    var flakonMap = buildFlakonMap(getFlakonList());
+    var aggregated = {};
+    var processed = 0;
+    var matchedByArticle = 0;
+    var matchedByName = 0;
 
-    if (!planName && !planArticleWb) continue;
-    processed++;
+    for (var i = 0; i < dataRows.length; i++) {
+      var row = dataRows[i];
+      var planName = getPlanCellString_(row, config.mapping.name);
+      var planArticleWb = getPlanCellString_(row, config.mapping.articleWb);
+      var monthQtys = config.months.map(function(month) {
+        return toPlanNumber_(isValidIndex_(month.column, headers.length) ? row[month.column] : '');
+      });
 
-    var match = matchPlanRow_(planName, planArticleWb, matchMaps);
-    if (match.matchBy === 'articleWb') matchedByArticle++;
-    if (match.matchBy === 'name') matchedByName++;
+      if (!planName && !planArticleWb) continue;
+      processed++;
 
-    var aggregateKey = match.rowIndex >= 0
-      ? ('matched:' + match.rowIndex)
-      : ('unmatched:' + normalizeMatchKey_(planArticleWb) + '||' + normalizeMatchKey_(planName));
+      var match = matchPlanRow_(planName, planArticleWb, matchMaps);
+      if (match.matchBy === 'articleWb') matchedByArticle++;
+      if (match.matchBy === 'name') matchedByName++;
 
-    if (!aggregated[aggregateKey]) {
-      aggregated[aggregateKey] = buildInitialPlanItem_(planName, planArticleWb, monthQtys, match, dataRowsCurrent, flakonMap);
-    } else {
-      for (var q = 0; q < monthQtys.length; q++) {
-        aggregated[aggregateKey].monthQtys[q] = round2_(toNumber_(aggregated[aggregateKey].monthQtys[q], 0) + monthQtys[q]);
+      var aggregateKey = match.rowIndex >= 0
+        ? ('matched:' + match.rowIndex)
+        : ('unmatched:' + normalizeMatchKey_(planArticleWb) + '||' + normalizeMatchKey_(planName));
+
+      if (!aggregated[aggregateKey]) {
+        aggregated[aggregateKey] = buildInitialPlanItem_(planName, planArticleWb, monthQtys, match, dataRowsCurrent, flakonMap);
+      } else {
+        for (var q = 0; q < monthQtys.length; q++) {
+          aggregated[aggregateKey].monthQtys[q] = round2_(toNumber_(aggregated[aggregateKey].monthQtys[q], 0) + monthQtys[q]);
+        }
       }
     }
+
+    var items = mapValues_(aggregated);
+    items.sort(function(a, b) {
+      if (!!a.matched !== !!b.matched) return a.matched ? -1 : 1;
+      return String(a.name || a.planName || '').localeCompare(String(b.name || b.planName || ''), 'ru', { sensitivity: 'base', numeric: true });
+    });
+
+    var deduped = items.length;
+    var activeMonths = getActivePlanMonths_(config.months);
+    var importSummary = buildPlanImportSummary_(items, activeMonths, {
+      processed: processed,
+      matchedByArticle: matchedByArticle,
+      matchedByName: matchedByName,
+      deduped: deduped
+    });
+
+    config.mapping.headers = headers;
+    config.importSummary = importSummary;
+    config.importedAt = new Date().toISOString();
+
+    writePlanSheetRows_(items);
+    savePlanImportConfig_(config);
+    var state = null;
+    var stateLoadError = '';
+    try {
+      state = getPlanCostState();
+    } catch (err3) {
+      stateLoadError = err3 && err3.message ? String(err3.message) : 'Не удалось обновить состояние вкладки после импорта.';
+    }
+
+    return {
+      success: true,
+      message: 'План импортирован: ' + importSummary.matchedItems + ' сопоставлено, ' + importSummary.unmatchedItems + ' не сопоставлено.',
+      importSummary: importSummary,
+      state: state,
+      stateLoadError: stateLoadError
+    };
+  } catch (err4) {
+    return planErrorResponse_('Непредвиденная ошибка импорта плана: ' + err4.message, err4);
   }
-
-  var items = mapValues_(aggregated);
-  items.sort(function(a, b) {
-    if (!!a.matched !== !!b.matched) return a.matched ? -1 : 1;
-    return String(a.name || a.planName || '').localeCompare(String(b.name || b.planName || ''), 'ru', { sensitivity: 'base', numeric: true });
-  });
-
-  var deduped = items.length;
-  var activeMonths = getActivePlanMonths_(config.months);
-  var importSummary = buildPlanImportSummary_(items, activeMonths, {
-    processed: processed,
-    matchedByArticle: matchedByArticle,
-    matchedByName: matchedByName,
-    deduped: deduped
-  });
-
-  config.mapping.headers = headers;
-  config.importSummary = importSummary;
-  config.importedAt = new Date().toISOString();
-
-  writePlanSheetRows_(items);
-  savePlanImportConfig_(config);
-  var state = null;
-  var stateLoadError = '';
-  try {
-    state = getPlanCostState();
-  } catch (err2) {
-    stateLoadError = err2 && err2.message ? String(err2.message) : 'Не удалось обновить состояние вкладки после импорта.';
-  }
-
-  return {
-    success: true,
-    message: 'План импортирован: ' + importSummary.matchedItems + ' сопоставлено, ' + importSummary.unmatchedItems + ' не сопоставлено.',
-    importSummary: importSummary,
-    state: state,
-    stateLoadError: stateLoadError
-  };
 }
 
 function getPlanCostState() {
-  var config = getPlanImportConfig_();
-  var items = getStoredPlanRows_();
-  var months = getActivePlanMonths_(config.months || buildDefaultPlanMonths_());
+  try {
+    var config = getPlanImportConfig_();
+    var items = getStoredPlanRows_();
+    var months = getActivePlanMonths_(config.months || buildDefaultPlanMonths_());
 
-  return {
-    success: true,
-    months: months,
-    items: items,
-    stats: buildPlanStateStats_(items, months),
-    importSummary: config.importSummary || buildPlanImportSummary_(items, months, {}),
-    importConfig: config
-  };
+    return {
+      success: true,
+      months: months,
+      items: items,
+      stats: buildPlanStateStats_(items, months),
+      importSummary: config.importSummary || buildPlanImportSummary_(items, months, {}),
+      importConfig: config
+    };
+  } catch (err) {
+    return planErrorResponse_('Не удалось загрузить состояние плана: ' + err.message, err);
+  }
 }
 
 function calculatePlanCosts(monthKey) {
-  var state = getPlanCostState();
-  var items = state.items || [];
-  var months = state.months || [];
-  if (!months.length) {
-    return { success: false, message: 'Сначала импортируйте план.' };
-  }
-
-  var month = months[0];
-  for (var i = 0; i < months.length; i++) {
-    if (months[i].key === monthKey) {
-      month = months[i];
-      break;
-    }
-  }
-
-  var dataObj = getData();
-  var dataRows = dataObj.rows || [];
-  if (!dataRows.length) return { success: false, message: 'Сначала загрузите данные на вкладке Импорт данных.' };
-
-  var params = getParams();
-  var flakonMap = buildFlakonMap(getFlakonList());
-  var bundleContext = buildBundleContext_(params, flakonMap, dataRows);
-  var results = [];
-  var unresolvedMatched = 0;
-
-  for (i = 0; i < items.length; i++) {
-    var item = items[i];
-    var planQty = round2_(toNumber_(item.monthQtys[month.slotIndex], 0));
-    if (planQty <= 0) continue;
-
-    var matchedRow = resolvePlanDataRow_(item, dataRows);
-    if (!matchedRow) {
-      if (item.matched) unresolvedMatched++;
-      continue;
+  try {
+    var state = getPlanCostState();
+    if (!state || !state.success) {
+      return planErrorResponse_(
+        (state && state.message) || 'Не удалось загрузить данные плана перед расчётом.',
+        state && state.diagnostic ? state.diagnostic : ''
+      );
     }
 
-    var calcResult = calculateOne(matchedRow, params, flakonMap, null, null, bundleContext, {});
-    var rowResult = buildPlanResultRow_(item, matchedRow, calcResult, planQty, false, calcResult.type === 'Наборы' ? 'Комплектация набора' : 'Расчёт');
-
-    if (calcResult.type === 'Наборы') {
-      rowResult._children = buildPlanBundleChildren_(item, matchedRow, planQty, params, flakonMap, bundleContext);
-      applyPlanChildrenTotals_(rowResult);
+    var items = state.items || [];
+    var months = state.months || [];
+    if (!months.length) {
+      return planErrorResponse_('Сначала импортируйте план.');
     }
 
-    results.push(rowResult);
+    var month = months[0];
+    for (var i = 0; i < months.length; i++) {
+      if (months[i].key === monthKey) {
+        month = months[i];
+        break;
+      }
+    }
+
+    var dataObj = getData();
+    var dataRows = dataObj.rows || [];
+    if (!dataRows.length) return planErrorResponse_('Сначала загрузите данные на вкладке Импорт данных.');
+
+    var params = getParams();
+    var flakonMap = buildFlakonMap(getFlakonList());
+    var bundleContext = buildBundleContext_(params, flakonMap, dataRows);
+    var results = [];
+    var unresolvedMatched = 0;
+
+    for (i = 0; i < items.length; i++) {
+      var item = items[i];
+      var planQty = round2_(toNumber_(item.monthQtys[month.slotIndex], 0));
+      if (planQty <= 0) continue;
+
+      var matchedRow = resolvePlanDataRow_(item, dataRows);
+      if (!matchedRow) {
+        if (item.matched) unresolvedMatched++;
+        continue;
+      }
+
+      var calcResult = calculateOne(matchedRow, params, flakonMap, null, null, bundleContext, {});
+      var rowResult = buildPlanResultRow_(item, matchedRow, calcResult, planQty, false, calcResult.type === 'Наборы' ? 'Комплектация набора' : 'Расчёт');
+
+      if (calcResult.type === 'Наборы') {
+        rowResult._children = buildPlanBundleChildren_(item, matchedRow, planQty, params, flakonMap, bundleContext);
+        applyPlanChildrenTotals_(rowResult);
+      }
+
+      results.push(rowResult);
+    }
+
+    results.sort(function(a, b) {
+      if (a.type !== b.type) return String(a.type || '').localeCompare(String(b.type || ''), 'ru', { sensitivity: 'base', numeric: true });
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ru', { sensitivity: 'base', numeric: true });
+    });
+
+    return {
+      success: true,
+      monthKey: month.key,
+      monthLabel: month.label,
+      results: results,
+      stats: buildPlanCalculationStats_(results, items, month.slotIndex, unresolvedMatched)
+    };
+  } catch (err) {
+    return planErrorResponse_('Ошибка расчёта плана: ' + err.message, err);
   }
-
-  results.sort(function(a, b) {
-    if (a.type !== b.type) return String(a.type || '').localeCompare(String(b.type || ''), 'ru', { sensitivity: 'base', numeric: true });
-    return String(a.name || '').localeCompare(String(b.name || ''), 'ru', { sensitivity: 'base', numeric: true });
-  });
-
-  return {
-    success: true,
-    monthKey: month.key,
-    monthLabel: month.label,
-    results: results,
-    stats: buildPlanCalculationStats_(results, items, month.slotIndex, unresolvedMatched)
-  };
 }
 
 function isValidPlanImportPayload_(config) {
