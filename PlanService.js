@@ -336,12 +336,20 @@ function importPlanCosts(payload) {
 
   writePlanSheetRows_(items);
   savePlanImportConfig_(config);
+  var state = null;
+  var stateLoadError = '';
+  try {
+    state = getPlanCostState();
+  } catch (err2) {
+    stateLoadError = err2 && err2.message ? String(err2.message) : 'Не удалось обновить состояние вкладки после импорта.';
+  }
 
   return {
     success: true,
     message: 'План импортирован: ' + importSummary.matchedItems + ' сопоставлено, ' + importSummary.unmatchedItems + ' не сопоставлено.',
     importSummary: importSummary,
-    state: getPlanCostState()
+    state: state,
+    stateLoadError: stateLoadError
   };
 }
 
