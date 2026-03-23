@@ -784,6 +784,34 @@ function recalculateAndStoreCostResults(params) {
   }
 }
 
+function recalculateCostResults(payload) {
+  try {
+    payload = payload || {};
+    var calc = calculateAll(payload.params || getParams(), payload.currentRows || []);
+    if (!calc || !calc.success) return calc || { success: false, message: 'Не удалось пересчитать себестоимость.' };
+
+    return {
+      success: true,
+      results: calc.results || [],
+      count: (calc.results || []).length,
+      stats: buildStoredCostStats_(calc.results || [])
+    };
+  } catch (err) {
+    return { success: false, message: 'Не удалось пересчитать себестоимость: ' + err.message, diagnostic: err.stack || '' };
+  }
+}
+
+function saveCostState(payload) {
+  try {
+    payload = payload || {};
+    var rows = payload.results || [];
+    writeStoredCostResults_(rows, { preserveExistingManuals: false });
+    return getCostState();
+  } catch (err) {
+    return { success: false, message: 'Не удалось сохранить изменения себестоимости: ' + err.message, diagnostic: err.stack || '' };
+  }
+}
+
 function saveCostManualOverride(payload) {
   try {
     payload = payload || {};
@@ -844,12 +872,13 @@ function getCostOverrideMap_() {
   return map;
 }
 
-function writeStoredCostResults_(results) {
+function writeStoredCostResults_(results, options) {
+  options = options || {};
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.RESULTS);
   if (!sheet) sheet = ss.insertSheet(CFG.RESULTS);
 
-  var existingManualMap = getStoredCostManualMap_();
+  var existingManualMap = options.preserveExistingManuals === false ? {} : getStoredCostManualMap_();
   var nowIso = new Date().toISOString();
   var rows = [COST_RESULT_HEADERS];
 
