@@ -3422,7 +3422,15 @@ function loadPlanImportSourceUI(silent) {
       STATE.planImportCtx.spreadsheetName = res.spreadsheetName || '';
       STATE.planImportCtx.sheets = res.sheets || [];
       if (!STATE.planImportCtx.sheetName && STATE.planImportCtx.sheets.length) {
-        STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        for (var si = 0; si < STATE.planImportCtx.sheets.length; si++) {
+          if (STATE.planImportCtx.sheets[si].selectable !== false) {
+            STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[si].name;
+            break;
+          }
+        }
+        if (!STATE.planImportCtx.sheetName) {
+          STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        }
       }
       var hasCurrent = false;
       for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
@@ -3432,7 +3440,16 @@ function loadPlanImportSourceUI(silent) {
         }
       }
       if (!hasCurrent && STATE.planImportCtx.sheets.length) {
-        STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        for (var sj = 0; sj < STATE.planImportCtx.sheets.length; sj++) {
+          if (STATE.planImportCtx.sheets[sj].selectable !== false) {
+            STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[sj].name;
+            hasCurrent = true;
+            break;
+          }
+        }
+        if (!hasCurrent) {
+          STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        }
       }
 
       renderPlanImportSheetOptions_();
@@ -3457,7 +3474,8 @@ function renderPlanImportSheetOptions_() {
   for (var i = 0; i < sheets.length; i++) {
     var opt = document.createElement('option');
     opt.value = sheets[i].name;
-    opt.textContent = sheets[i].name + ' (' + (sheets[i].rowCount || 0) + '×' + (sheets[i].colCount || 0) + ')';
+    opt.textContent = sheets[i].name + ' (' + (sheets[i].rowCount || 0) + '×' + (sheets[i].colCount || 0) + ')' + (sheets[i].selectable === false ? ' [не поддерживается]' : '');
+    opt.disabled = sheets[i].selectable === false;
     if (sheets[i].name === STATE.planImportCtx.sheetName) opt.selected = true;
     select.appendChild(opt);
   }
@@ -3477,6 +3495,17 @@ function refreshPlanImportPreview() {
     }
   }
   if (!selectedSheet) return;
+
+  if (selectedSheet.selectable === false) {
+    STATE.planImportCtx.headers = [];
+    STATE.planImportCtx.mapping = { name: -1, articleWb: -1 };
+    document.getElementById('plan-mapping-grid').innerHTML = '<div class="mapping-hint">' + esc(selectedSheet.previewError || 'Выбранный лист не поддерживается для импорта плана.') + '</div>';
+    document.getElementById('plan-month-grid').innerHTML = '<div class="mapping-hint">Выберите обычный лист Google Sheets вместо DATASOURCE.</div>';
+    renderPlanPreviewTable_([]);
+    document.getElementById('plan-import-source-info').textContent =
+      (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · ' + (selectedSheet.previewError || 'Лист не поддерживается');
+    return;
+  }
 
   var previewRows = selectedSheet.previewRows || [];
   var headerIdx = STATE.planImportCtx.headerRow - 1;
@@ -3747,6 +3776,18 @@ function buildPlanImportPayload_() {
 function confirmPlanImport() {
   if (!STATE.planImportCtx || !STATE.planImportCtx.sheets || !STATE.planImportCtx.sheets.length) {
     showAlert('Внимание', 'Сначала загрузите источник плана.');
+    return;
+  }
+
+  var selectedSheet = null;
+  for (var si = 0; si < STATE.planImportCtx.sheets.length; si++) {
+    if (STATE.planImportCtx.sheets[si].name === STATE.planImportCtx.sheetName) {
+      selectedSheet = STATE.planImportCtx.sheets[si];
+      break;
+    }
+  }
+  if (selectedSheet && selectedSheet.selectable === false) {
+    showAlert('Внимание', selectedSheet.previewError || 'Выбранный лист не поддерживается для импорта плана.');
     return;
   }
 
