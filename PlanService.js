@@ -55,12 +55,58 @@ var PLAN_COL = {
   NOTE: 19
 };
 
+function extractPlanSpreadsheetId_(value) {
+  var input = String(value || '').trim();
+  if (!input) return '';
+
+  var pathMatch = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/i);
+  if (pathMatch && pathMatch[1]) return pathMatch[1];
+
+  var queryMatch = input.match(/[?&]id=([a-zA-Z0-9-_]+)/i);
+  if (queryMatch && queryMatch[1]) return queryMatch[1];
+
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(input)) return input;
+  return '';
+}
+
+function openPlanSpreadsheet_(value) {
+  var input = String(value || '').trim();
+  if (!input) throw new Error('Укажите ссылку или ID Google Sheets.');
+
+  var id = extractPlanSpreadsheetId_(input);
+  var byIdError = null;
+  var byUrlError = null;
+
+  if (id) {
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (err) {
+      byIdError = err;
+    }
+  }
+
+  if (/^https?:\/\//i.test(input)) {
+    try {
+      return SpreadsheetApp.openByUrl(input);
+    } catch (err2) {
+      byUrlError = err2;
+    }
+  }
+
+  var details = [];
+  if (byIdError) details.push('openById: ' + byIdError.message);
+  if (byUrlError) details.push('openByUrl: ' + byUrlError.message);
+  if (!details.length) details.push('Не удалось извлечь корректный ID таблицы из введённого значения.');
+
+  throw new Error(details.join(' | '));
+}
+
 function getPlanImportSource(url) {
   var cleanUrl = String(url || '').trim();
   if (!cleanUrl) return { success: false, message: 'Укажите ссылку на Google Sheets.' };
 
   try {
-    var ss = SpreadsheetApp.openByUrl(cleanUrl);
+    var ss = openPlanSpreadsheet_(cleanUrl);
     var sheets = ss.getSheets().map(function(sheet) {
       var lastRow = sheet.getLastRow();
       var lastCol = sheet.getLastColumn();
@@ -103,7 +149,7 @@ function importPlanCosts(payload) {
 
   var externalSheet;
   try {
-    externalSheet = SpreadsheetApp.openByUrl(config.spreadsheetUrl).getSheetByName(config.sheetName);
+    externalSheet = openPlanSpreadsheet_(config.spreadsheetUrl).getSheetByName(config.sheetName);
   } catch (err) {
     return { success: false, message: 'Не удалось открыть источник плана: ' + err.message };
   }
