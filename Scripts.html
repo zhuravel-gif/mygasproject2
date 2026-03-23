@@ -2728,13 +2728,14 @@ function showTab(tabId) {
   document.querySelectorAll('.nav-tab').forEach(function(el) { el.classList.remove('active'); });
   document.getElementById('tab-' + tabId).classList.add('active');
   var tabs = document.querySelectorAll('.nav-tab');
-  var names = ['params', 'export', 'flakons', 'bundles', 'cost', 'calc', 'verify'];
+  var names = ['params', 'export', 'flakons', 'bundles', 'cost', 'plan-cost', 'calc', 'verify'];
   for (var i = 0; i < names.length; i++) {
     if (names[i] === tabId && tabs[i]) tabs[i].classList.add('active');
   }
   if (tabId === 'params' && !STATE.params) loadParamsUI();
   if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
   if (tabId === 'bundles' && (!STATE.bundleData || !STATE.bundleData.rows || !STATE.bundleData.rows.length)) loadBundlesUI();
+  if (tabId === 'plan-cost' && (!STATE.planCost || !STATE.planCost.loaded)) loadPlanCostStateUI(true);
   if (tabId === 'calc') ensureFlakonsState(function() {
     populateCalcSelects();
     syncCalcParamsFromParams(STATE.params || getParamsFromUI());
@@ -3301,5 +3302,706 @@ function collectBundlePayload() {
     activeSpecs: activeSpecs,
     manualCosts: manualCosts
   };
+}
+
+// ============================================================
+// TAB 8: PLAN COST
+// ============================================================
+STATE.planCost = STATE.planCost || {
+  loaded: false,
+  months: [],
+  items: [],
+  stats: null,
+  importSummary: null,
+  importConfig: null,
+  results: [],
+  activeMonthKey: ''
+};
+STATE.planImportCtx = STATE.planImportCtx || null;
+
+var PLAN_COST_COLUMNS = [
+  { key: 'name', label: 'Позиция', numeric: false, width: 260, filter: 'input' },
+  { key: 'articleWb', label: 'Артикул ВБ', numeric: false, width: 130, filter: 'input' },
+  { key: 'article', label: 'Артикул', numeric: false, width: 120, filter: 'input' },
+  { key: 'category', label: 'Категория', numeric: false, width: 140, filter: 'list' },
+  { key: 'group1', label: 'Товарная группа 1', numeric: false, width: 150, filter: 'list' },
+  { key: 'type', label: 'Тип', numeric: false, width: 120, filter: 'list' },
+  { key: 'rawName', label: 'Основное сырьё', numeric: false, width: 150, filter: 'list' },
+  { key: 'flakonName', label: 'Флакон', numeric: false, width: 140, filter: 'list' },
+  { key: 'planQty', label: 'План, шт', numeric: true, width: 100 },
+  { key: 'rawPlan', label: 'Сырьё', numeric: true, width: 110 },
+  { key: 'taxDutyPlan', label: 'Нал+Пош', numeric: true, width: 110 },
+  { key: 'deliveryPlan', label: 'Доставка', numeric: true, width: 110 },
+  { key: 'rawFlPlan', label: 'Цена фл.', numeric: true, width: 110 },
+  { key: 'deliveryFlPlan', label: 'Дост. фл.', numeric: true, width: 110 },
+  { key: 'taxDutyFlPlan', label: 'НДС+пошл. фл.', numeric: true, width: 130 },
+  { key: 'labelPlan', label: 'Этикетка', numeric: true, width: 100 },
+  { key: 'totalFlPlan', label: 'Себес. фл.', numeric: true, width: 120 },
+  { key: 'unitTotal', label: 'Себес./шт', numeric: true, width: 110 },
+  { key: 'totalPlan', label: 'Итого на план', numeric: true, width: 130, total: true },
+  { key: 'source', label: 'Источник', numeric: false, width: 140, filter: 'list' }
+];
+
+function togglePlanGuide() {
+  var guide = document.getElementById('plan-guide');
+  if (!guide) return;
+  guide.classList.toggle('hidden');
+}
+
+function openPlanImportModal() {
+  var config = (STATE.planCost && STATE.planCost.importConfig) ? STATE.planCost.importConfig : null;
+  STATE.planImportCtx = {
+    spreadsheetUrl: config && config.spreadsheetUrl ? config.spreadsheetUrl : '',
+    spreadsheetName: config && config.spreadsheetName ? config.spreadsheetName : '',
+    sheetName: config && config.sheetName ? config.sheetName : '',
+    headerRow: config && config.headerRow ? config.headerRow : 1,
+    sheets: [],
+    headers: [],
+    mapping: {
+      name: config && config.mapping ? parseInt(config.mapping.name, 10) : -1,
+      articleWb: config && config.mapping ? parseInt(config.mapping.articleWb, 10) : -1
+    },
+    months: buildPlanImportMonths_(config && config.months ? config.months : null)
+  };
+
+  document.getElementById('plan-source-url').value = STATE.planImportCtx.spreadsheetUrl;
+  document.getElementById('plan-header-row').value = STATE.planImportCtx.headerRow;
+  document.getElementById('plan-sheet-select').innerHTML = '';
+  document.getElementById('plan-mapping-grid').innerHTML = '';
+  document.getElementById('plan-month-grid').innerHTML = '';
+  document.getElementById('plan-preview-head').innerHTML = '';
+  document.getElementById('plan-preview-body').innerHTML = '';
+  document.getElementById('plan-import-source-info').textContent = 'Источник не загружен';
+  document.getElementById('plan-import-modal').classList.add('active');
+  document.body.classList.add('modal-open');
+  initIcons();
+
+  if (STATE.planImportCtx.spreadsheetUrl) {
+    loadPlanImportSourceUI(true);
+  }
+}
+
+function closePlanImportModal() {
+  document.getElementById('plan-import-modal').classList.remove('active');
+  document.body.classList.remove('modal-open');
+}
+
+function buildPlanImportMonths_(savedMonths) {
+  var months = [];
+  for (var i = 0; i < 3; i++) {
+    var src = savedMonths && savedMonths[i] ? savedMonths[i] : {};
+    var col = parseInt(src.column, 10);
+    months.push({
+      key: src.key || ('month' + (i + 1)),
+      label: src.label || ('Месяц ' + (i + 1)),
+      column: isNaN(col) ? -1 : col,
+      header: src.header || ''
+    });
+  }
+  return months;
+}
+
+function loadPlanImportSourceUI(silent) {
+  if (!STATE.planImportCtx) openPlanImportModal();
+  var url = String(document.getElementById('plan-source-url').value || '').trim();
+  if (!url) {
+    showAlert('Внимание', 'Укажите ссылку на Google Sheets.');
+    return;
+  }
+
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('plan-cost-status', (res && res.message) || 'Не удалось загрузить источник плана.', 'error');
+        return;
+      }
+
+      STATE.planImportCtx.spreadsheetUrl = url;
+      STATE.planImportCtx.spreadsheetName = res.spreadsheetName || '';
+      STATE.planImportCtx.sheets = res.sheets || [];
+      if (!STATE.planImportCtx.sheetName && STATE.planImportCtx.sheets.length) {
+        STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+      }
+      var hasCurrent = false;
+      for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
+        if (STATE.planImportCtx.sheets[i].name === STATE.planImportCtx.sheetName) {
+          hasCurrent = true;
+          break;
+        }
+      }
+      if (!hasCurrent && STATE.planImportCtx.sheets.length) {
+        STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+      }
+
+      renderPlanImportSheetOptions_();
+      refreshPlanImportPreview();
+      if (!silent) {
+        setStatus('plan-cost-status', 'Источник плана загружен: ' + (res.spreadsheetName || 'Google Sheets'), 'success');
+      }
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('plan-cost-status', 'Ошибка загрузки источника плана: ' + err.message, 'error');
+    })
+    .getPlanImportSource(url);
+}
+
+function renderPlanImportSheetOptions_() {
+  var select = document.getElementById('plan-sheet-select');
+  if (!select) return;
+  select.innerHTML = '';
+
+  var sheets = STATE.planImportCtx ? (STATE.planImportCtx.sheets || []) : [];
+  for (var i = 0; i < sheets.length; i++) {
+    var opt = document.createElement('option');
+    opt.value = sheets[i].name;
+    opt.textContent = sheets[i].name + ' (' + (sheets[i].rowCount || 0) + '×' + (sheets[i].colCount || 0) + ')';
+    if (sheets[i].name === STATE.planImportCtx.sheetName) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+function refreshPlanImportPreview() {
+  if (!STATE.planImportCtx || !STATE.planImportCtx.sheets || !STATE.planImportCtx.sheets.length) return;
+
+  STATE.planImportCtx.sheetName = document.getElementById('plan-sheet-select').value || STATE.planImportCtx.sheetName;
+  STATE.planImportCtx.headerRow = Math.max(parseInt(document.getElementById('plan-header-row').value, 10) || 1, 1);
+
+  var selectedSheet = null;
+  for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
+    if (STATE.planImportCtx.sheets[i].name === STATE.planImportCtx.sheetName) {
+      selectedSheet = STATE.planImportCtx.sheets[i];
+      break;
+    }
+  }
+  if (!selectedSheet) return;
+
+  var previewRows = selectedSheet.previewRows || [];
+  var headerIdx = STATE.planImportCtx.headerRow - 1;
+  var rawHeaders = previewRows[headerIdx] || [];
+  var headers = [];
+  for (i = 0; i < rawHeaders.length; i++) {
+    headers.push(String(rawHeaders[i] || '').trim() || ('Колонка ' + colLabelV2(i)));
+  }
+
+  STATE.planImportCtx.headers = headers;
+  STATE.planImportCtx.mapping = buildPlanImportMapping_();
+  renderPlanImportMappingControls_();
+  renderPlanMonthControls_();
+  renderPlanPreviewTable_(previewRows);
+
+  document.getElementById('plan-import-source-info').textContent =
+    (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · Строка заголовков: ' + STATE.planImportCtx.headerRow;
+}
+
+function buildPlanImportMapping_() {
+  var headers = STATE.planImportCtx.headers || [];
+  var config = (STATE.planCost && STATE.planCost.importConfig) ? STATE.planCost.importConfig : null;
+  var current = {};
+  var fields = ['name', 'articleWb'];
+
+  for (var i = 0; i < fields.length; i++) {
+    var select = document.getElementById('plan-map-' + fields[i]);
+    if (select) current[fields[i]] = parseInt(select.value, 10);
+  }
+
+  var mapping = {};
+  for (i = 0; i < fields.length; i++) {
+    var field = fields[i];
+    var best = -1;
+    var savedHeader = config && config.mapping
+      ? String(field === 'name' ? (config.mapping.nameHeader || '') : (config.mapping.articleWbHeader || '')).trim()
+      : '';
+    if (typeof current[field] === 'number' && !isNaN(current[field]) && current[field] >= 0 && current[field] < headers.length) {
+      best = current[field];
+    } else if (STATE.planImportCtx.mapping && typeof STATE.planImportCtx.mapping[field] === 'number' && STATE.planImportCtx.mapping[field] >= 0 && STATE.planImportCtx.mapping[field] < headers.length) {
+      best = STATE.planImportCtx.mapping[field];
+    } else if (savedHeader) {
+      for (var s = 0; s < headers.length; s++) {
+        if (normalizeKeyV2(headers[s]) === normalizeKeyV2(savedHeader)) {
+          best = s;
+          break;
+        }
+      }
+    } else if (config && config.mapping && typeof config.mapping[field] === 'number' && config.mapping[field] >= 0 && config.mapping[field] < headers.length) {
+      best = config.mapping[field];
+    } else {
+      var hints = field === 'name'
+        ? ['наименование', 'номенклатура', 'товар']
+        : ['артикул вб', 'wb', 'wildberries'];
+      for (var h = 0; h < hints.length; h++) {
+        var hint = normalizeKeyV2(hints[h]);
+        for (var j = 0; j < headers.length; j++) {
+          if (normalizeKeyV2(headers[j]).indexOf(hint) >= 0) {
+            best = j;
+            break;
+          }
+        }
+        if (best >= 0) break;
+      }
+    }
+    mapping[field] = best;
+  }
+
+  return mapping;
+}
+
+function renderPlanImportMappingControls_() {
+  var headers = STATE.planImportCtx.headers || [];
+  var defs = [
+    { key: 'name', label: 'Наименование', required: false, hint: 'Колонка названия товара из плана' },
+    { key: 'articleWb', label: 'Артикул ВБ', required: false, hint: 'Колонка артикула Wildberries для первичного сопоставления' }
+  ];
+  var html = '';
+
+  for (var i = 0; i < defs.length; i++) {
+    var def = defs[i];
+    html += '<div class="mapping-row">';
+    html += '<div><div class="mapping-label">' + esc(def.label) + '</div>';
+    html += '<div class="mapping-hint">' + esc(def.hint) + '</div></div>';
+    html += '<select id="plan-map-' + def.key + '" class="mapping-select" onchange="onPlanMappingChanged_(\'' + def.key + '\', this.value)">';
+    html += '<option value="-1">— Не импортировать —</option>';
+    for (var j = 0; j < headers.length; j++) {
+      var selected = STATE.planImportCtx.mapping[def.key] === j ? ' selected' : '';
+      html += '<option value="' + j + '"' + selected + '>' + colLabelV2(j) + ': ' + esc(headers[j]) + '</option>';
+    }
+    html += '</select></div>';
+  }
+
+  document.getElementById('plan-mapping-grid').innerHTML = html;
+}
+
+function onPlanMappingChanged_(key, value) {
+  STATE.planImportCtx.mapping[key] = parseInt(value, 10);
+  renderPlanPreviewTable_();
+}
+
+function renderPlanMonthControls_() {
+  var headers = STATE.planImportCtx.headers || [];
+  var config = (STATE.planCost && STATE.planCost.importConfig) ? STATE.planCost.importConfig : null;
+  var html = '';
+
+  for (var i = 0; i < STATE.planImportCtx.months.length; i++) {
+    var month = STATE.planImportCtx.months[i];
+    var currentLabel = document.getElementById('plan-month-label-' + i);
+    var currentSelect = document.getElementById('plan-month-col-' + i);
+
+    if (currentLabel) month.label = String(currentLabel.value || '').trim() || month.label;
+    if (currentSelect) month.column = parseInt(currentSelect.value, 10);
+
+    if ((isNaN(month.column) || month.column < 0) && config && config.months && config.months[i] && typeof config.months[i].column === 'number') {
+      month.column = config.months[i].column;
+    }
+
+    if ((isNaN(month.column) || month.column < 0) && month.header) {
+      for (var h = 0; h < headers.length; h++) {
+        if (normalizeKeyV2(headers[h]) === normalizeKeyV2(month.header)) {
+          month.column = h;
+          break;
+        }
+      }
+    }
+
+    html += '<div class="mapping-row">';
+    html += '<div><div class="mapping-label required">Месяц ' + (i + 1) + '</div><div class="mapping-hint">Название периода и колонка количества</div></div>';
+    html += '<div>';
+    html += '<input id="plan-month-label-' + i + '" type="text" value="' + esc(month.label) + '" placeholder="Например, Июль 2026" oninput="onPlanMonthLabelChanged_(' + i + ', this.value)">';
+    html += '<select id="plan-month-col-' + i + '" class="mapping-select" onchange="onPlanMonthColumnChanged_(' + i + ', this.value)" style="margin-top:8px">';
+    html += '<option value="-1">— Выберите колонку —</option>';
+    for (var j = 0; j < headers.length; j++) {
+      var selected = month.column === j ? ' selected' : '';
+      html += '<option value="' + j + '"' + selected + '>' + colLabelV2(j) + ': ' + esc(headers[j]) + '</option>';
+    }
+    html += '</select></div></div>';
+  }
+
+  document.getElementById('plan-month-grid').innerHTML = html;
+}
+
+function onPlanMonthLabelChanged_(index, value) {
+  if (!STATE.planImportCtx || !STATE.planImportCtx.months[index]) return;
+  STATE.planImportCtx.months[index].label = String(value || '').trim();
+}
+
+function onPlanMonthColumnChanged_(index, value) {
+  if (!STATE.planImportCtx || !STATE.planImportCtx.months[index]) return;
+  var col = parseInt(value, 10);
+  STATE.planImportCtx.months[index].column = col;
+  STATE.planImportCtx.months[index].header =
+    (typeof col === 'number' && !isNaN(col) && col >= 0 && col < STATE.planImportCtx.headers.length)
+      ? STATE.planImportCtx.headers[col]
+      : '';
+
+  if (!STATE.planImportCtx.months[index].label || STATE.planImportCtx.months[index].label.indexOf('Месяц ') === 0) {
+    STATE.planImportCtx.months[index].label = STATE.planImportCtx.months[index].header || ('Месяц ' + (index + 1));
+    var input = document.getElementById('plan-month-label-' + index);
+    if (input) input.value = STATE.planImportCtx.months[index].label;
+  }
+
+  renderPlanPreviewTable_();
+}
+
+function renderPlanPreviewTable_(previewRows) {
+  var rows = previewRows || [];
+  if (!rows.length && STATE.planImportCtx && STATE.planImportCtx.sheets) {
+    for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
+      if (STATE.planImportCtx.sheets[i].name === STATE.planImportCtx.sheetName) {
+        rows = STATE.planImportCtx.sheets[i].previewRows || [];
+        break;
+      }
+    }
+  }
+
+  var headers = STATE.planImportCtx ? (STATE.planImportCtx.headers || []) : [];
+  var coloredCols = {};
+  if (STATE.planImportCtx && STATE.planImportCtx.mapping) {
+    if (typeof STATE.planImportCtx.mapping.name === 'number' && STATE.planImportCtx.mapping.name >= 0) coloredCols[STATE.planImportCtx.mapping.name] = '#dce8ff';
+    if (typeof STATE.planImportCtx.mapping.articleWb === 'number' && STATE.planImportCtx.mapping.articleWb >= 0) coloredCols[STATE.planImportCtx.mapping.articleWb] = '#dce8ff';
+  }
+  if (STATE.planImportCtx && STATE.planImportCtx.months) {
+    for (i = 0; i < STATE.planImportCtx.months.length; i++) {
+      if (typeof STATE.planImportCtx.months[i].column === 'number' && STATE.planImportCtx.months[i].column >= 0) {
+        coloredCols[STATE.planImportCtx.months[i].column] = '#eefbf2';
+      }
+    }
+  }
+
+  var thead = document.getElementById('plan-preview-head');
+  var tbody = document.getElementById('plan-preview-body');
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+
+  if (!headers.length) {
+    var trNoHeaders = document.createElement('tr');
+    var tdNoHeaders = document.createElement('td');
+    tdNoHeaders.textContent = 'Загрузите источник и выберите строку заголовков.';
+    trNoHeaders.appendChild(tdNoHeaders);
+    tbody.appendChild(trNoHeaders);
+    return;
+  }
+
+  var headRow = document.createElement('tr');
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = colLabelV2(h) + ': ' + headers[h];
+    if (coloredCols[h]) th.style.background = coloredCols[h];
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+
+  var startRow = STATE.planImportCtx ? STATE.planImportCtx.headerRow : 1;
+  var dataRows = rows.slice(startRow);
+  var previewCount = Math.min(dataRows.length, 20);
+  if (!previewCount) {
+    var trEmpty = document.createElement('tr');
+    var tdEmpty = document.createElement('td');
+    tdEmpty.colSpan = Math.max(headers.length, 1);
+    tdEmpty.textContent = 'Нет строк данных для предпросмотра.';
+    trEmpty.appendChild(tdEmpty);
+    tbody.appendChild(trEmpty);
+    return;
+  }
+
+  for (var r = 0; r < previewCount; r++) {
+    var tr = document.createElement('tr');
+    var row = dataRows[r] || [];
+    for (var c = 0; c < headers.length; c++) {
+      var td = document.createElement('td');
+      td.textContent = row[c] === null || row[c] === undefined ? '' : String(row[c]);
+      if (coloredCols[c]) td.style.background = coloredCols[c] === '#eefbf2' ? '#f4fff7' : '#f5f9ff';
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function buildPlanImportPayload_() {
+  var headers = STATE.planImportCtx.headers || [];
+  return {
+    spreadsheetUrl: STATE.planImportCtx.spreadsheetUrl,
+    spreadsheetName: STATE.planImportCtx.spreadsheetName,
+    sheetName: STATE.planImportCtx.sheetName,
+    headerRow: STATE.planImportCtx.headerRow,
+    mapping: {
+      name: STATE.planImportCtx.mapping.name,
+      articleWb: STATE.planImportCtx.mapping.articleWb,
+      nameHeader: (typeof STATE.planImportCtx.mapping.name === 'number' && STATE.planImportCtx.mapping.name >= 0 && STATE.planImportCtx.mapping.name < headers.length) ? headers[STATE.planImportCtx.mapping.name] : '',
+      articleWbHeader: (typeof STATE.planImportCtx.mapping.articleWb === 'number' && STATE.planImportCtx.mapping.articleWb >= 0 && STATE.planImportCtx.mapping.articleWb < headers.length) ? headers[STATE.planImportCtx.mapping.articleWb] : ''
+    },
+    months: STATE.planImportCtx.months.map(function(month, index) {
+      var labelInput = document.getElementById('plan-month-label-' + index);
+      var select = document.getElementById('plan-month-col-' + index);
+      var col = select ? parseInt(select.value, 10) : month.column;
+      return {
+        key: month.key,
+        label: String(labelInput ? labelInput.value : month.label).trim(),
+        column: col,
+        header: (typeof col === 'number' && !isNaN(col) && col >= 0 && col < headers.length) ? headers[col] : ''
+      };
+    })
+  };
+}
+
+function confirmPlanImport() {
+  if (!STATE.planImportCtx || !STATE.planImportCtx.sheets || !STATE.planImportCtx.sheets.length) {
+    showAlert('Внимание', 'Сначала загрузите источник плана.');
+    return;
+  }
+
+  var payload = buildPlanImportPayload_();
+  if (payload.mapping.name < 0 && payload.mapping.articleWb < 0) {
+    showAlert('Внимание', 'Укажите хотя бы одну колонку сопоставления: Наименование или Артикул ВБ.');
+    return;
+  }
+  for (var i = 0; i < payload.months.length; i++) {
+    if (!payload.months[i].label || payload.months[i].column < 0) {
+      showAlert('Внимание', 'Для каждого из трёх месяцев укажите название и колонку количества.');
+      return;
+    }
+  }
+
+  closePlanImportModal();
+  showLoading();
+  setStatus('plan-cost-status', 'Импортирую план продаж...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('plan-cost-status', (res && res.message) || 'Импорт плана завершился с ошибкой.', 'error');
+        return;
+      }
+
+      if (res.state) applyPlanCostState_(res.state);
+      var summary = res.importSummary || {};
+      var message = 'План импортирован: ' + (summary.matchedItems || 0) + ' сопоставлено, ' + (summary.unmatchedItems || 0) + ' не сопоставлено, дублей объединено: ' + Math.max((summary.processedRows || 0) - (summary.dedupedRows || 0), 0) + '.';
+      setStatus('plan-cost-status', message, 'success');
+      runPlanCalculation();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('plan-cost-status', 'Ошибка импорта плана: ' + err.message, 'error');
+    })
+    .importPlanCosts(payload);
+}
+
+function loadPlanCostStateUI(shouldCalculate) {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(state) {
+      hideLoading();
+      applyPlanCostState_(state || {});
+
+      if (!STATE.planCost.items || !STATE.planCost.items.length) {
+        setStatus('plan-cost-status', 'План ещё не импортирован.', 'info');
+        renderPlanCostStats(null);
+        renderPlanCostTable([]);
+        return;
+      }
+
+      var summary = STATE.planCost.importSummary || {};
+      setStatus(
+        'plan-cost-status',
+        'Загружено строк плана: ' + (STATE.planCost.items.length || 0) +
+          ', сопоставлено: ' + (summary.matchedItems || 0) +
+          ', не сопоставлено: ' + (summary.unmatchedItems || 0),
+        'success'
+      );
+
+      if (shouldCalculate) runPlanCalculation();
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('plan-cost-status', 'Ошибка загрузки плана: ' + err.message, 'error');
+    })
+    .getPlanCostState();
+}
+
+function applyPlanCostState_(state) {
+  STATE.planCost.loaded = true;
+  STATE.planCost.months = state.months || [];
+  STATE.planCost.items = state.items || [];
+  STATE.planCost.stats = state.stats || null;
+  STATE.planCost.importSummary = state.importSummary || null;
+  STATE.planCost.importConfig = state.importConfig || null;
+  renderPlanMonthSelect_();
+  renderPlanCostStats(null);
+}
+
+function renderPlanMonthSelect_() {
+  var select = document.getElementById('plan-month-select');
+  if (!select) return;
+
+  var current = STATE.planCost.activeMonthKey || select.value;
+  select.innerHTML = '<option value="">— Выберите месяц —</option>';
+
+  var months = STATE.planCost.months || [];
+  for (var i = 0; i < months.length; i++) {
+    var opt = document.createElement('option');
+    opt.value = months[i].key;
+    opt.textContent = months[i].label;
+    select.appendChild(opt);
+  }
+
+  if (current) {
+    for (i = 0; i < months.length; i++) {
+      if (months[i].key === current) {
+        select.value = current;
+        STATE.planCost.activeMonthKey = current;
+        return;
+      }
+    }
+  }
+
+  if (months.length) {
+    select.value = months[0].key;
+    STATE.planCost.activeMonthKey = months[0].key;
+  }
+}
+
+function runPlanCalculation() {
+  var monthSelect = document.getElementById('plan-month-select');
+  var monthKey = monthSelect ? monthSelect.value : '';
+  if (!monthKey) {
+    setStatus('plan-cost-status', 'Выберите месяц для расчёта.', 'info');
+    return;
+  }
+
+  STATE.planCost.activeMonthKey = monthKey;
+  showLoading();
+  setStatus('plan-cost-status', 'Рассчитываю затраты по плану...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('plan-cost-status', (res && res.message) || 'Не удалось рассчитать план.', 'error');
+        return;
+      }
+
+      STATE.planCost.results = res.results || [];
+      renderPlanCostTable(STATE.planCost.results);
+      renderPlanCostStats(res);
+      setStatus(
+        'plan-cost-status',
+        'Рассчитано позиций для месяца "' + (res.monthLabel || monthKey) + '": ' + (STATE.planCost.results.length || 0) + ', unmatched: ' + ((res.stats && res.stats.unmatchedItems) || 0),
+        'success'
+      );
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('plan-cost-status', 'Ошибка расчёта плана: ' + err.message, 'error');
+    })
+    .calculatePlanCosts(monthKey);
+}
+
+function renderPlanCostStats(calcResponse) {
+  var host = document.getElementById('plan-cost-stats');
+  if (!host) return;
+
+  if (!calcResponse || !calcResponse.stats) {
+    var base = STATE.planCost.stats || { totalItems: 0, matchedItems: 0, unmatchedItems: 0 };
+    host.innerHTML =
+      '<span class="stat-item"><span class="stat-dot" style="background:#64748b"></span>Импортировано: ' + (base.totalItems || 0) + '</span>' +
+      '<span class="stat-item"><span class="stat-dot" style="background:#22c55e"></span>Сопоставлено: ' + (base.matchedItems || 0) + '</span>' +
+      '<span class="stat-item"><span class="stat-dot" style="background:#f59e0b"></span>Не сопоставлено: ' + (base.unmatchedItems || 0) + '</span>';
+    return;
+  }
+
+  var stats = calcResponse.stats || {};
+  host.innerHTML =
+    '<span class="stat-item"><span class="stat-dot" style="background:#0f766e"></span>Месяц: ' + esc(calcResponse.monthLabel || '') + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#1d4ed8"></span>Бюджет: <b>' + fmt(stats.totalBudget) + '</b></span>' +
+    '<span class="stat-item">План, шт: <b>' + fmt(stats.totalPlanQty) + '</b></span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#c5221f"></span>Сырьё: ' + ((stats.types && stats.types.raw) || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#137333"></span>Гот.товар: ' + ((stats.types && stats.types.finished) || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#0b57d0"></span>Флаконы: ' + ((stats.types && stats.types.flakons) || 0) + '</span>' +
+    '<span class="stat-item"><span class="stat-dot" style="background:#9e9e9e"></span>Наборы: ' + ((stats.types && stats.types.sets) || 0) + '</span>' +
+    '<span class="stat-item">|</span>' +
+    '<span class="stat-item">Сырьё: <b>' + fmt(stats.rawPlan) + '</b></span>' +
+    '<span class="stat-item">Доставка: <b>' + fmt(stats.deliveryPlan) + '</b></span>' +
+    '<span class="stat-item">Себес. фл.: <b>' + fmt(stats.totalFlPlan) + '</b></span>' +
+    '<span class="stat-item">Unmatched: <b>' + (stats.unmatchedItems || 0) + '</b></span>';
+}
+
+function buildPlanTabulatorColumns_() {
+  var columns = [];
+  for (var i = 0; i < PLAN_COST_COLUMNS.length; i++) {
+    var col = PLAN_COST_COLUMNS[i];
+    var def = {
+      title: col.label,
+      field: col.key,
+      headerSort: true,
+      resizable: true,
+      minWidth: col.width || 100
+    };
+
+    if (col.key === 'name') {
+      def.frozen = true;
+      def.headerFilter = 'input';
+      def.headerFilterPlaceholder = 'Поиск...';
+    } else if (col.key === 'type') {
+      def.formatter = fmtTypeBadge;
+      def.headerFilter = 'list';
+      def.headerFilterParams = { values: { '': 'Все', 'Сырьё': 'Сырьё', 'Готовый товар': 'Готовый товар', 'Флакон': 'Флакон', 'Наборы': 'Наборы' } };
+    } else if (col.filter === 'input') {
+      def.headerFilter = 'input';
+      def.headerFilterPlaceholder = 'Поиск...';
+    } else if (col.filter === 'list') {
+      def.headerFilter = 'list';
+      def.headerFilterFunc = '=';
+      def.headerFilterParams = { valuesLookup: true, sortValuesList: 'asc' };
+    } else if (col.numeric) {
+      def.headerFilter = false;
+    }
+
+    if (col.numeric) {
+      def.hozAlign = 'right';
+      def.formatter = fmtNumber;
+      def.formatterParams = { decimals: 2 };
+    }
+
+    if (col.total) {
+      def.cssClass = 'col-total';
+    }
+
+    columns.push(def);
+  }
+  return columns;
+}
+
+function renderPlanCostTable(results) {
+  var data = results || [];
+  var container = document.getElementById('plan-cost-table-container');
+  if (!container) return;
+
+  if (!data.length) {
+    if (STATE.tables.planCost) {
+      STATE.tables.planCost.destroy();
+      STATE.tables.planCost = null;
+    }
+    container.innerHTML = '<div class="tabulator"><div class="tabulator-placeholder">Импортируйте план и выберите месяц для расчёта.</div></div>';
+    return;
+  }
+
+  var columns = buildPlanTabulatorColumns_();
+  if (STATE.tables.planCost) {
+    STATE.tables.planCost.replaceData(data);
+    return;
+  }
+
+  STATE.tables.planCost = createTable('plan-cost-table-container', columns, data, {
+    height: '72vh',
+    layout: 'fitDataFill',
+    placeholder: 'Импортируйте план и выберите месяц для расчёта',
+    dataTree: true,
+    dataTreeStartExpanded: false,
+    dataTreeChildField: '_children',
+    dataTreeChildIndent: 18,
+    rowFormatter: function(row) {
+      var d = row.getData();
+      if (d && d.isComponent) row.getElement().classList.add('plan-component-row');
+    }
+  });
 }
 </script>

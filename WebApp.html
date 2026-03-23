@@ -15,6 +15,7 @@
     <button class="nav-tab" onclick="showTab('flakons')"><i data-lucide="flask-round"></i> Флаконы</button>
     <button class="nav-tab" onclick="showTab('bundles')"><i data-lucide="package"></i> Наборы</button>
     <button class="nav-tab" onclick="showTab('cost')"><i data-lucide="calculator"></i> Себестоимость</button>
+    <button class="nav-tab" onclick="showTab('plan-cost')"><i data-lucide="bar-chart-3"></i> План затрат</button>
     <button class="nav-tab" onclick="showTab('calc')"><i data-lucide="sliders-horizontal"></i> Калькулятор</button>
     <button class="nav-tab" onclick="showTab('verify')"><i data-lucide="check-circle"></i> Проверка</button>
   </div>
@@ -93,6 +94,70 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeImportModal()">Отмена</button>
       <button class="btn btn-primary" onclick="confirmImport()">Импортировать</button>
+    </div>
+  </div>
+</div>
+
+<div id="plan-import-modal" class="modal">
+  <div class="modal-card plan-import-modal-card">
+    <div class="modal-header">
+      <div>
+        <h3>Импорт плана продаж</h3>
+        <p id="plan-import-modal-subtitle" class="hint">Укажите ссылку на Google Sheets, выберите лист, строки заголовков и три месяца плана.</p>
+      </div>
+      <button class="btn btn-icon" onclick="closePlanImportModal()"><i data-lucide="x"></i></button>
+    </div>
+
+    <div class="modal-body">
+      <div class="wizard-grid">
+        <div class="wizard-panel">
+          <div class="param-group">
+            <label>Ссылка на Google Sheets</label>
+            <input id="plan-source-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/...">
+          </div>
+
+          <div class="actions">
+            <button class="btn btn-secondary" onclick="loadPlanImportSourceUI()"><i data-lucide="link"></i> Загрузить листы</button>
+          </div>
+
+          <div id="plan-import-source-info" class="info-chip">Источник не загружен</div>
+
+          <div class="param-group">
+            <label>Лист</label>
+            <select id="plan-sheet-select" onchange="refreshPlanImportPreview()"></select>
+          </div>
+
+          <div class="param-group">
+            <label>Строка заголовков</label>
+            <input id="plan-header-row" type="number" min="1" step="1" value="1" onchange="refreshPlanImportPreview()">
+          </div>
+
+          <div>
+            <h4 class="section-title">Сопоставление колонок</h4>
+            <div id="plan-mapping-grid" class="mapping-grid"></div>
+          </div>
+
+          <div>
+            <h4 class="section-title">Три месяца плана</h4>
+            <div id="plan-month-grid" class="mapping-grid"></div>
+          </div>
+        </div>
+
+        <div class="wizard-panel">
+          <h4 class="section-title">Предпросмотр</h4>
+          <div class="table-wrap import-preview-wrap">
+            <table class="data-table preview-table">
+              <thead id="plan-preview-head"></thead>
+              <tbody id="plan-preview-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closePlanImportModal()">Отмена</button>
+      <button class="btn btn-primary" onclick="confirmPlanImport()"><i data-lucide="download"></i> Импортировать план</button>
     </div>
   </div>
 </div>
@@ -308,6 +373,47 @@
 
     <div class="card section-card table-card cost-table-card">
       <div id="cost-table-container"></div>
+    </div>
+  </div>
+
+  <div id="tab-plan-cost" class="tab-content">
+    <div class="card section-card cost-card">
+      <div class="section-head">
+        <h2>Расчёт затрат по плану</h2>
+        <button class="btn btn-secondary btn-sm" onclick="togglePlanGuide()">Инструкция</button>
+      </div>
+      <p class="hint">Импортируйте план продаж из Google Sheets, выберите месяц и посмотрите бюджет по статьям себестоимости в привычной табличной форме.</p>
+
+      <div id="plan-guide" class="guide-card hidden">
+        <ol class="guide-list">
+          <li>Нажмите `Импорт плана`, вставьте ссылку на Google Sheets и выберите лист с планом продаж.</li>
+          <li>Сопоставьте `Наименование`, `Артикул ВБ` и три колонки месяцев, затем импортируйте план.</li>
+          <li>После импорта выберите нужный месяц и нажмите `Пересчитать`, чтобы получить затраты по текущим данным и настройкам.</li>
+          <li>Для наборов родительская строка раскрывается и показывает состав активной спецификации с детальными затратами по компонентам.</li>
+        </ol>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" onclick="openPlanImportModal()"><i data-lucide="file-input"></i> Импорт плана</button>
+        <button class="btn btn-secondary" onclick="runPlanCalculation()"><i data-lucide="play"></i> Пересчитать</button>
+        <button class="btn btn-outline" onclick="loadPlanCostStateUI(true)"><i data-lucide="refresh-cw"></i> Обновить</button>
+      </div>
+
+      <div class="plan-toolbar">
+        <div class="param-group plan-month-select-group">
+          <label>Активный месяц</label>
+          <select id="plan-month-select" onchange="runPlanCalculation()">
+            <option value="">— Выберите месяц —</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="plan-cost-status" class="status"></div>
+      <div id="plan-cost-stats" class="stats-bar"></div>
+    </div>
+
+    <div class="card section-card table-card cost-table-card">
+      <div id="plan-cost-table-container"></div>
     </div>
   </div>
 
