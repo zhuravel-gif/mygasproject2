@@ -6,7 +6,6 @@ var PLAN_COST_CFG = {
   SHEET: 'План затрат',
   META_KEY: 'plan.importConfig',
   PREVIEW_ROWS: 120,
-  PREVIEW_COLS: 30,
   MONTH_KEYS: ['month1', 'month2', 'month3'],
   HEADERS: [
     'План.Наименование',
@@ -110,6 +109,89 @@ function getPlanSheetType_(sheet) {
   }
 }
 
+function getPlanDataSourceColumnNames_(dataSourceSheet, limitCols) {
+  var dataSource = dataSourceSheet.getDataSource();
+  var columns = dataSource && dataSource.getColumns ? dataSource.getColumns() : [];
+  var names = [];
+
+  for (var i = 0; i < columns.length; i++) {
+    if (limitCols && names.length >= limitCols) break;
+    var name = '';
+    try {
+      name = String(columns[i].getName ? columns[i].getName() : '').trim();
+    } catch (err) {
+      name = '';
+    }
+    names.push(name || ('Колонка ' + (i + 1)));
+  }
+
+  return names;
+}
+
+function buildPlanRowsFromColumnArrays_(headers, columnArrays) {
+  var maxRows = 0;
+  for (var i = 0; i < columnArrays.length; i++) {
+    if (columnArrays[i] && columnArrays[i].length > maxRows) maxRows = columnArrays[i].length;
+  }
+
+  var rows = [headers.slice()];
+  for (var r = 0; r < maxRows; r++) {
+    var row = [];
+    for (var c = 0; c < headers.length; c++) {
+      row.push(columnArrays[c] && r < columnArrays[c].length ? columnArrays[c][r] : '');
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function readPlanDataSourceSheet_(sheet, rowLimit, colLimit) {
+  var dataSourceSheet = sheet && sheet.asDataSourceSheet ? sheet.asDataSourceSheet() : null;
+  if (!dataSourceSheet) throw new Error('Не удалось получить DataSourceSheet для выбранного листа.');
+
+  var headers = getPlanDataSourceColumnNames_(dataSourceSheet, colLimit);
+  if (!headers.length) throw new Error('В DATASOURCE-листе не найдено доступных колонок.');
+
+  var columnArrays = [];
+  for (var i = 0; i < headers.length; i++) {
+    var values = rowLimit
+      ? dataSourceSheet.getSheetValues(headers[i], 1, rowLimit)
+      : dataSourceSheet.getSheetValues(headers[i]);
+    columnArrays.push(values || []);
+  }
+
+  var rows = buildPlanRowsFromColumnArrays_(headers, columnArrays);
+  return {
+    rows: rows,
+    headerRowLocked: true,
+    rowCount: rows.length,
+    colCount: headers.length
+  };
+}
+
+function readPlanSheetSourceRows_(sheet, rowLimit, colLimit) {
+  var type = getPlanSheetType_(sheet);
+  if (type === 'DATASOURCE') {
+    return readPlanDataSourceSheet_(sheet, rowLimit, colLimit);
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  var rows = [];
+  if (lastRow > 0 && lastCol > 0) {
+    rows = sheet
+      .getRange(1, 1, Math.min(lastRow, rowLimit || lastRow), Math.min(lastCol, colLimit || lastCol))
+      .getDisplayValues();
+  }
+
+  return {
+    rows: rows,
+    headerRowLocked: false,
+    rowCount: lastRow,
+    colCount: lastCol
+  };
+}
+
 function buildPlanSourceSheetInfo_(sheet) {
   var info = {
     name: sheet.getName(),
@@ -118,25 +200,16 @@ function buildPlanSourceSheetInfo_(sheet) {
     colCount: 0,
     previewRows: [],
     previewError: '',
-    selectable: true
+    selectable: true,
+    headerRowLocked: false
   };
 
-  // Data source sheets can throw on generic sheet range/size operations.
-  // We keep them visible in the list but do not let them break the whole import dialog.
-  if (info.type === 'DATASOURCE') {
-    info.selectable = false;
-    info.previewError = 'Лист типа DATASOURCE не поддерживается для импорта плана. Выберите обычный лист Google Sheets.';
-    return info;
-  }
-
   try {
-    info.rowCount = sheet.getLastRow();
-    info.colCount = sheet.getLastColumn();
-    if (info.rowCount > 0 && info.colCount > 0) {
-      info.previewRows = sheet
-        .getRange(1, 1, Math.min(info.rowCount, PLAN_COST_CFG.PREVIEW_ROWS), Math.min(info.colCount, PLAN_COST_CFG.PREVIEW_COLS))
-        .getDisplayValues();
-    }
+    var sourceData = readPlanSheetSourceRows_(sheet, PLAN_COST_CFG.PREVIEW_ROWS - 1, null);
+    info.rowCount = sourceData.rowCount;
+    info.colCount = sourceData.colCount;
+    info.previewRows = sourceData.rows;
+    info.headerRowLocked = !!sourceData.headerRowLocked;
   } catch (err) {
     info.selectable = false;
     info.previewError = 'Не удалось прочитать лист: ' + err.message;
@@ -184,13 +257,21 @@ function importPlanCosts(payload) {
   }
   if (!externalSheet) return { success: false, message: 'Лист источника не найден.' };
 
-  var lastRow = externalSheet.getLastRow();
-  var lastCol = externalSheet.getLastColumn();
+  var sourceData;
+  try {
+    sourceData = readPlanSheetSourceRows_(externalSheet, null, null);
+  } catch (err2) {
+    return { success: false, message: 'Не удалось прочитать строки источника плана: ' + err2.message };
+  }
+
+  if (sourceData.headerRowLocked) config.headerRow = 1;
+  var sourceRows = sourceData.rows || [];
+  var lastRow = sourceRows.length;
+  var lastCol = sourceRows[0] ? sourceRows[0].length : 0;
   if (lastRow < config.headerRow || lastCol < 1) {
     return { success: false, message: 'В выбранном листе нет данных для импорта.' };
   }
 
-  var sourceRows = externalSheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
   var headers = buildNormalizedHeaders_(sourceRows[config.headerRow - 1] || []);
   var dataRows = sourceRows.slice(config.headerRow).filter(isRowWithValues_);
   if (!dataRows.length) {
