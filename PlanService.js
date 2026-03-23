@@ -322,7 +322,8 @@ function importPlanCosts(payload) {
   });
 
   var deduped = items.length;
-  var importSummary = buildPlanImportSummary_(items, config.months, {
+  var activeMonths = getActivePlanMonths_(config.months);
+  var importSummary = buildPlanImportSummary_(items, activeMonths, {
     processed: processed,
     matchedByArticle: matchedByArticle,
     matchedByName: matchedByName,
@@ -347,7 +348,7 @@ function importPlanCosts(payload) {
 function getPlanCostState() {
   var config = getPlanImportConfig_();
   var items = getStoredPlanRows_();
-  var months = config.months || buildDefaultPlanMonths_();
+  var months = getActivePlanMonths_(config.months || buildDefaultPlanMonths_());
 
   return {
     success: true,
@@ -367,11 +368,9 @@ function calculatePlanCosts(monthKey) {
     return { success: false, message: 'Сначала импортируйте план.' };
   }
 
-  var monthIndex = 0;
   var month = months[0];
   for (var i = 0; i < months.length; i++) {
     if (months[i].key === monthKey) {
-      monthIndex = i;
       month = months[i];
       break;
     }
@@ -389,7 +388,7 @@ function calculatePlanCosts(monthKey) {
 
   for (i = 0; i < items.length; i++) {
     var item = items[i];
-    var planQty = round2_(toNumber_(item.monthQtys[monthIndex], 0));
+    var planQty = round2_(toNumber_(item.monthQtys[month.slotIndex], 0));
     if (planQty <= 0) continue;
 
     var matchedRow = resolvePlanDataRow_(item, dataRows);
@@ -419,23 +418,28 @@ function calculatePlanCosts(monthKey) {
     monthKey: month.key,
     monthLabel: month.label,
     results: results,
-    stats: buildPlanCalculationStats_(results, items, monthIndex, unresolvedMatched)
+    stats: buildPlanCalculationStats_(results, items, month.slotIndex, unresolvedMatched)
   };
 }
 
 function isValidPlanImportPayload_(config) {
   if (!config.mapping) return false;
   if (!isValidIndex_(config.mapping.name, 9999) && !isValidIndex_(config.mapping.articleWb, 9999)) return false;
-  if (!config.months || config.months.length !== 3) return false;
+  if (!config.months || !config.months.length) return false;
 
   var usedColumns = {};
+  var activeMonths = 0;
   for (var i = 0; i < config.months.length; i++) {
     var month = config.months[i];
-    if (!month.label || !isValidIndex_(month.column, 9999)) return false;
+    var hasLabel = !!String(month.label || '').trim();
+    var hasColumn = isValidIndex_(month.column, 9999);
+    if (!hasLabel && !hasColumn) continue;
+    if (!hasLabel || !hasColumn) return false;
     if (usedColumns[month.column]) return false;
     usedColumns[month.column] = true;
+    activeMonths++;
   }
-  return true;
+  return activeMonths > 0;
 }
 
 function normalizePlanImportConfig_(payload) {
@@ -445,7 +449,7 @@ function normalizePlanImportConfig_(payload) {
     var src = inputMonths[i] || {};
     months.push({
       key: PLAN_COST_CFG.MONTH_KEYS[i],
-      label: String(src.label || ('Месяц ' + (i + 1))).trim(),
+      label: String(src.label || '').trim(),
       column: parseInt(src.column, 10),
       header: String(src.header || '').trim()
     });
@@ -492,7 +496,7 @@ function getPlanImportConfig_() {
     parsed.months = parsed.months && parsed.months.length === 3 ? parsed.months : buildDefaultPlanMonths_();
     for (var i = 0; i < parsed.months.length; i++) {
       parsed.months[i].key = parsed.months[i].key || PLAN_COST_CFG.MONTH_KEYS[i];
-      parsed.months[i].label = String(parsed.months[i].label || ('Месяц ' + (i + 1))).trim();
+      parsed.months[i].label = String(parsed.months[i].label || '').trim();
       parsed.months[i].column = parseInt(parsed.months[i].column, 10);
       parsed.months[i].header = String(parsed.months[i].header || '').trim();
     }
@@ -520,12 +524,33 @@ function buildDefaultPlanMonths_() {
   for (var i = 0; i < PLAN_COST_CFG.MONTH_KEYS.length; i++) {
     months.push({
       key: PLAN_COST_CFG.MONTH_KEYS[i],
-      label: 'Месяц ' + (i + 1),
+      label: '',
       column: -1,
       header: ''
     });
   }
   return months;
+}
+
+function getActivePlanMonths_(months) {
+  var source = months && months.length ? months : buildDefaultPlanMonths_();
+  var active = [];
+
+  for (var i = 0; i < source.length; i++) {
+    var month = source[i] || {};
+    var label = String(month.label || '').trim();
+    var column = parseInt(month.column, 10);
+    if (!label || !isValidIndex_(column, 9999)) continue;
+    active.push({
+      key: month.key || PLAN_COST_CFG.MONTH_KEYS[i] || ('month' + (i + 1)),
+      label: label,
+      column: column,
+      header: String(month.header || '').trim(),
+      slotIndex: i
+    });
+  }
+
+  return active;
 }
 
 function buildNormalizedHeaders_(row) {
@@ -621,7 +646,7 @@ function buildPlanImportSummary_(items, months, extra) {
     if (items[i].matched) matchedItems++;
     else unmatchedItems++;
     for (var m = 0; m < months.length; m++) {
-      if (toNumber_(items[i].monthQtys[m], 0) > 0) monthCounts[months[m].key]++;
+      if (toNumber_(items[i].monthQtys[months[m].slotIndex], 0) > 0) monthCounts[months[m].key]++;
     }
   }
 
@@ -733,7 +758,7 @@ function buildPlanStateStats_(items, months) {
     if (items[i].matched) matched++;
     else unmatched++;
     for (var m = 0; m < months.length; m++) {
-      if (toNumber_(items[i].monthQtys[m], 0) > 0) monthCounts[months[m].key]++;
+      if (toNumber_(items[i].monthQtys[months[m].slotIndex], 0) > 0) monthCounts[months[m].key]++;
     }
   }
 
