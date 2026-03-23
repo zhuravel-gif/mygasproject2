@@ -190,6 +190,26 @@ function applyCostOverrideToResult_(result, row, overrideMap) {
   return result;
 }
 
+function buildRuntimeCostOverrideMap_(overrideRows) {
+  if (!overrideRows || !overrideRows.length) {
+    return typeof getCostOverrideMap_ === 'function' ? getCostOverrideMap_() : {};
+  }
+
+  var map = {};
+  for (var i = 0; i < overrideRows.length; i++) {
+    var item = overrideRows[i] || {};
+    if (!item.manualMode) continue;
+    var manualTotal = round2_(toNumber_(item.manualTotal, item.total));
+    var keys = typeof getCostLookupKeys_ === 'function'
+      ? getCostLookupKeys_(item.name, item.articleWb, item.article)
+      : [];
+    for (var j = 0; j < keys.length; j++) {
+      map[keys[j]] = { manualMode: true, manualTotal: manualTotal };
+    }
+  }
+  return map;
+}
+
 function calculateNamedCostInfo_(name, bundleContext, stack) {
   var key = normalizeMatchKey_(name);
   if (!key) {
@@ -555,7 +575,7 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
   return applyCostOverrideToResult_(result, row, overrideMap);
 }
 
-function calculateAll(params) {
+function calculateAll(params, overrideRows) {
   var dataObj = getData();
   if (!dataObj.rows || dataObj.rows.length === 0) {
     return {
@@ -567,7 +587,9 @@ function calculateAll(params) {
 
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
+  var overrideMap = buildRuntimeCostOverrideMap_(overrideRows);
   var bundleContext = buildBundleContext_(params || {}, flakonMap, dataObj.rows || []);
+  bundleContext.overrideMap = overrideMap;
   var results = [];
 
   for (var i = 0; i < dataObj.rows.length; i++) {
