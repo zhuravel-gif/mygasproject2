@@ -3514,6 +3514,7 @@ STATE.planCost = STATE.planCost || {
   loaded: false,
   months: [],
   items: [],
+  itemCount: 0,
   stats: null,
   importSummary: null,
   importConfig: null,
@@ -4081,7 +4082,7 @@ function loadPlanCostStateUI(shouldCalculate) {
       }
       applyPlanCostState_(state || {});
 
-      if (!STATE.planCost.items || !STATE.planCost.items.length) {
+      if (!(STATE.planCost.itemCount > 0)) {
         setStatus('plan-cost-status', 'План ещё не импортирован.', 'info');
         renderPlanCostStats(null);
         renderPlanCostTable([]);
@@ -4091,7 +4092,7 @@ function loadPlanCostStateUI(shouldCalculate) {
       var summary = STATE.planCost.importSummary || {};
       setStatus(
         'plan-cost-status',
-        'Загружено строк плана: ' + (STATE.planCost.items.length || 0) +
+        'Загружено строк плана: ' + (STATE.planCost.itemCount || 0) +
           ', сопоставлено: ' + (summary.matchedItems || 0) +
           ', не сопоставлено: ' + (summary.unmatchedItems || 0),
         'success'
@@ -4110,6 +4111,7 @@ function applyPlanCostState_(state) {
   STATE.planCost.loaded = true;
   STATE.planCost.months = state.months || [];
   STATE.planCost.items = state.items || [];
+  STATE.planCost.itemCount = state.itemCount || ((state.stats && state.stats.totalItems) || 0);
   STATE.planCost.stats = state.stats || null;
   STATE.planCost.importSummary = state.importSummary || null;
   STATE.planCost.importConfig = state.importConfig || null;
@@ -4149,7 +4151,7 @@ function renderPlanMonthSelect_() {
 }
 
 function runPlanCalculation() {
-  if (!STATE.planCost || !STATE.planCost.loaded || !STATE.planCost.items || !STATE.planCost.items.length) {
+  if (!STATE.planCost || !STATE.planCost.loaded || !(STATE.planCost.itemCount > 0)) {
     loadPlanCostStateUI(true);
     return;
   }

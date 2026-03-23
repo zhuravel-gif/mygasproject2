@@ -382,20 +382,26 @@ function importPlanCosts(payload) {
   }
 }
 
+function buildPlanCostState_(includeItems) {
+  var config = getPlanImportConfig_();
+  var items = getStoredPlanRows_();
+  var months = getActivePlanMonths_(config.months || buildDefaultPlanMonths_());
+  var payload = {
+    success: true,
+    months: months,
+    stats: buildPlanStateStats_(items, months),
+    importSummary: config.importSummary || buildPlanImportSummary_(items, months, {}),
+    importConfig: config,
+    itemCount: items.length
+  };
+
+  if (includeItems) payload.items = items;
+  return payload;
+}
+
 function getPlanCostState() {
   try {
-    var config = getPlanImportConfig_();
-    var items = getStoredPlanRows_();
-    var months = getActivePlanMonths_(config.months || buildDefaultPlanMonths_());
-
-    return {
-      success: true,
-      months: months,
-      items: items,
-      stats: buildPlanStateStats_(items, months),
-      importSummary: config.importSummary || buildPlanImportSummary_(items, months, {}),
-      importConfig: config
-    };
+    return buildPlanCostState_(false);
   } catch (err) {
     return planErrorResponse_('Не удалось загрузить состояние плана: ' + err.message, err);
   }
@@ -403,7 +409,7 @@ function getPlanCostState() {
 
 function calculatePlanCosts(monthKey) {
   try {
-    var state = getPlanCostState();
+    var state = buildPlanCostState_(true);
     if (!state || !state.success) {
       return planErrorResponse_(
         (state && state.message) || 'Не удалось загрузить данные плана перед расчётом.',
