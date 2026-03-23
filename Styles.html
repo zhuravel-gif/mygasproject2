@@ -222,6 +222,19 @@ body.modal-open {
   margin-top: 6px;
 }
 
+.plan-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin: 8px 0 10px;
+}
+
+.plan-month-select-group {
+  min-width: 260px;
+  margin-bottom: 0;
+}
+
 .btn {
   padding: 8px 16px;
   border-radius: 10px;
@@ -984,6 +997,10 @@ body.modal-open {
   animation: modalSlideIn 0.2s ease;
 }
 
+.plan-import-modal-card {
+  width: min(1240px, 100%);
+}
+
 @keyframes modalSlideIn {
   from { transform: scale(0.96) translateY(8px); opacity: 0; }
   to { transform: scale(1) translateY(0); opacity: 1; }
@@ -1010,6 +1027,10 @@ body.modal-open {
   overflow: auto;
 }
 
+.plan-import-modal-card .info-chip {
+  margin-bottom: 8px;
+}
+
 .wizard-grid {
   display: grid;
   grid-template-columns: minmax(320px, 360px) 1fr;
@@ -1025,6 +1046,10 @@ body.modal-open {
 .mapping-grid {
   display: grid;
   gap: 10px;
+}
+
+.tabulator-row.plan-component-row {
+  background: rgba(59, 130, 246, 0.025) !important;
 }
 
 .mapping-row {
