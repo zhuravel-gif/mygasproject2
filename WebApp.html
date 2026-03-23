@@ -103,7 +103,7 @@
     <div class="modal-header">
       <div>
         <h3>Импорт плана продаж</h3>
-        <p id="plan-import-modal-subtitle" class="hint">Укажите ссылку на Google Sheets, выберите лист, строки заголовков и три месяца плана.</p>
+        <p id="plan-import-modal-subtitle" class="hint">Укажите ссылку или ID Google Sheets, выберите лист, строку заголовков и три месяца плана.</p>
       </div>
       <button class="btn btn-icon" onclick="closePlanImportModal()"><i data-lucide="x"></i></button>
     </div>
@@ -112,8 +112,8 @@
       <div class="wizard-grid">
         <div class="wizard-panel">
           <div class="param-group">
-            <label>Ссылка на Google Sheets</label>
-            <input id="plan-source-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/...">
+            <label>Ссылка или ID Google Sheets</label>
+            <input id="plan-source-url" type="text" placeholder="https://docs.google.com/spreadsheets/d/... или spreadsheetId">
           </div>
 
           <div class="actions">

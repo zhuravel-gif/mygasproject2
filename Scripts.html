@@ -3405,7 +3405,7 @@ function loadPlanImportSourceUI(silent) {
   if (!STATE.planImportCtx) openPlanImportModal();
   var url = String(document.getElementById('plan-source-url').value || '').trim();
   if (!url) {
-    showAlert('Внимание', 'Укажите ссылку на Google Sheets.');
+    showAlert('Внимание', 'Укажите ссылку или ID Google Sheets.');
     return;
   }
 
