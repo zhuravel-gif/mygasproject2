@@ -3838,11 +3838,20 @@ function confirmPlanImport() {
         return;
       }
 
-      if (res.state) applyPlanCostState_(res.state);
       var summary = res.importSummary || {};
       var message = 'План импортирован: ' + (summary.matchedItems || 0) + ' сопоставлено, ' + (summary.unmatchedItems || 0) + ' не сопоставлено, дублей объединено: ' + Math.max((summary.processedRows || 0) - (summary.dedupedRows || 0), 0) + '.';
       setStatus('plan-cost-status', message, 'success');
-      runPlanCalculation();
+
+      if (res.state) {
+        applyPlanCostState_(res.state);
+        runPlanCalculation();
+        return;
+      }
+
+      if (res.stateLoadError) {
+        showToast('План импортирован. Состояние вкладки обновляю отдельно: ' + res.stateLoadError, 'warning');
+      }
+      loadPlanCostStateUI(true);
     })
     .withFailureHandler(function(err) {
       hideLoading();
