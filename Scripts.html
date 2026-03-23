@@ -3366,6 +3366,7 @@ function openPlanImportModal() {
 
   document.getElementById('plan-source-url').value = STATE.planImportCtx.spreadsheetUrl;
   document.getElementById('plan-header-row').value = STATE.planImportCtx.headerRow;
+  document.getElementById('plan-header-row').disabled = false;
   document.getElementById('plan-sheet-select').innerHTML = '';
   document.getElementById('plan-mapping-grid').innerHTML = '';
   document.getElementById('plan-month-grid').innerHTML = '';
@@ -3485,7 +3486,8 @@ function refreshPlanImportPreview() {
   if (!STATE.planImportCtx || !STATE.planImportCtx.sheets || !STATE.planImportCtx.sheets.length) return;
 
   STATE.planImportCtx.sheetName = document.getElementById('plan-sheet-select').value || STATE.planImportCtx.sheetName;
-  STATE.planImportCtx.headerRow = Math.max(parseInt(document.getElementById('plan-header-row').value, 10) || 1, 1);
+  var headerRowInput = document.getElementById('plan-header-row');
+  STATE.planImportCtx.headerRow = Math.max(parseInt(headerRowInput.value, 10) || 1, 1);
 
   var selectedSheet = null;
   for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
@@ -3496,11 +3498,21 @@ function refreshPlanImportPreview() {
   }
   if (!selectedSheet) return;
 
+  if (selectedSheet.headerRowLocked) {
+    STATE.planImportCtx.headerRow = 1;
+    if (headerRowInput) {
+      headerRowInput.value = '1';
+      headerRowInput.disabled = true;
+    }
+  } else if (headerRowInput) {
+    headerRowInput.disabled = false;
+  }
+
   if (selectedSheet.selectable === false) {
     STATE.planImportCtx.headers = [];
     STATE.planImportCtx.mapping = { name: -1, articleWb: -1 };
     document.getElementById('plan-mapping-grid').innerHTML = '<div class="mapping-hint">' + esc(selectedSheet.previewError || 'Выбранный лист не поддерживается для импорта плана.') + '</div>';
-    document.getElementById('plan-month-grid').innerHTML = '<div class="mapping-hint">Выберите обычный лист Google Sheets вместо DATASOURCE.</div>';
+    document.getElementById('plan-month-grid').innerHTML = '<div class="mapping-hint">Выберите другой лист источника.</div>';
     renderPlanPreviewTable_([]);
     document.getElementById('plan-import-source-info').textContent =
       (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · ' + (selectedSheet.previewError || 'Лист не поддерживается');
@@ -3522,7 +3534,10 @@ function refreshPlanImportPreview() {
   renderPlanPreviewTable_(previewRows);
 
   document.getElementById('plan-import-source-info').textContent =
-    (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · Строка заголовков: ' + STATE.planImportCtx.headerRow;
+    (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · ' +
+    (selectedSheet.type === 'DATASOURCE'
+      ? 'Тип: DATASOURCE · Заголовки фиксированы'
+      : 'Строка заголовков: ' + STATE.planImportCtx.headerRow);
 }
 
 function buildPlanImportMapping_() {
