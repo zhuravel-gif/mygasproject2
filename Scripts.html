@@ -3841,13 +3841,6 @@ function confirmPlanImport() {
       var summary = res.importSummary || {};
       var message = 'План импортирован: ' + (summary.matchedItems || 0) + ' сопоставлено, ' + (summary.unmatchedItems || 0) + ' не сопоставлено, дублей объединено: ' + Math.max((summary.processedRows || 0) - (summary.dedupedRows || 0), 0) + '.';
       setStatus('plan-cost-status', message, 'success');
-
-      if (res.state) {
-        applyPlanCostState_(res.state);
-        runPlanCalculation();
-        return;
-      }
-
       if (res.stateLoadError) {
         showToast('План импортирован. Состояние вкладки обновляю отдельно: ' + res.stateLoadError, 'warning');
       }
@@ -3935,8 +3928,19 @@ function renderPlanMonthSelect_() {
 }
 
 function runPlanCalculation() {
+  if (!STATE.planCost || !STATE.planCost.loaded || !STATE.planCost.items || !STATE.planCost.items.length) {
+    loadPlanCostStateUI(true);
+    return;
+  }
+
   var monthSelect = document.getElementById('plan-month-select');
   var monthKey = monthSelect ? monthSelect.value : '';
+  if (!monthKey) {
+    if (STATE.planCost.months && STATE.planCost.months.length) {
+      renderPlanMonthSelect_();
+      monthKey = monthSelect ? monthSelect.value : '';
+    }
+  }
   if (!monthKey) {
     setStatus('plan-cost-status', 'Выберите месяц для расчёта.', 'info');
     return;
