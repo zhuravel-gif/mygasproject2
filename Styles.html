@@ -1516,6 +1516,51 @@ body.modal-open {
   display: none !important;
 }
 
+.status-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.status-main-text {
+  flex: 1 1 280px;
+}
+
+.status-inline-toggle {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.status-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.status-details-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.status-details-list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.status-details-list li + li {
+  margin-top: 4px;
+}
+
 @media (max-width: 920px) {
   .navbar {
     flex-direction: column;
