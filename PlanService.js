@@ -982,6 +982,7 @@ function buildPlanCalculationStats_(results, allItems, monthIndex, unresolvedMat
     totalBudget: 0,
     totalPlanQty: 0,
     unmatchedItems: unresolvedMatched,
+    unmatchedList: [],
     types: { raw: 0, finished: 0, flakons: 0, sets: 0 },
     rawPlan: 0,
     taxDutyPlan: 0,
@@ -1014,7 +1015,10 @@ function buildPlanCalculationStats_(results, allItems, monthIndex, unresolvedMat
   }
 
   for (i = 0; i < allItems.length; i++) {
-    if (!allItems[i].matched && toNumber_(allItems[i].monthQtys[monthIndex], 0) > 0) unresolvedMatched++;
+    if (!allItems[i].matched && toNumber_(allItems[i].monthQtys[monthIndex], 0) > 0) {
+      unresolvedMatched++;
+      stats.unmatchedList.push(formatPlanUnmatchedItemLabel_(allItems[i]));
+    }
   }
   stats.unmatchedItems = unresolvedMatched;
 
@@ -1030,4 +1034,12 @@ function buildPlanCalculationStats_(results, allItems, monthIndex, unresolvedMat
   stats.totalFlPlan = round2_(stats.totalFlPlan);
 
   return stats;
+}
+
+function formatPlanUnmatchedItemLabel_(item) {
+  item = item || {};
+  var name = String(item.planName || item.name || '').trim();
+  var articleWb = String(item.planArticleWb || item.articleWb || '').trim();
+  if (name && articleWb) return name + ' (' + articleWb + ')';
+  return name || articleWb || 'Без названия';
 }

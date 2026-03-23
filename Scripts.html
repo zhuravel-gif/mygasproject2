@@ -79,6 +79,42 @@ function buildPlanThrownErrorText_(prefix, err) {
   return buildPlanStatusError_(prefix ? (prefix + ': ' + message) : message, diagnostic, err && err.name);
 }
 
+function renderPlanStatusMessage_(message, type, unmatchedList) {
+  var el = document.getElementById('plan-cost-status');
+  if (!el) return;
+
+  el.className = 'status ' + (type || '');
+  if (!unmatchedList || !unmatchedList.length) {
+    el.textContent = message;
+    return;
+  }
+
+  var items = [];
+  for (var i = 0; i < unmatchedList.length; i++) {
+    items.push('<li>' + esc(unmatchedList[i]) + '</li>');
+  }
+
+  el.innerHTML =
+    '<div class="status-main-row">' +
+      '<span class="status-main-text">' + esc(message) + '</span>' +
+      '<button type="button" class="status-inline-toggle" onclick="togglePlanStatusDetails_(this)">Показать unmatched</button>' +
+    '</div>' +
+    '<div class="status-details hidden">' +
+      '<div class="status-details-title">Не сопоставленные позиции</div>' +
+      '<ul class="status-details-list">' + items.join('') + '</ul>' +
+    '</div>';
+}
+
+function togglePlanStatusDetails_(button) {
+  if (!button) return;
+  var host = button.closest('.status');
+  if (!host) return;
+  var details = host.querySelector('.status-details');
+  if (!details) return;
+  var hidden = details.classList.toggle('hidden');
+  button.textContent = hidden ? 'Показать unmatched' : 'Скрыть unmatched';
+}
+
 function toggleImportGuide() {
   var guide = document.getElementById('import-guide');
   if (!guide) return;
@@ -4331,10 +4367,10 @@ function runPlanCalculation() {
       STATE.planCost.results = res.results || [];
       renderPlanCostTable(STATE.planCost.results);
       renderPlanCostStats(res);
-      setStatus(
-        'plan-cost-status',
+      renderPlanStatusMessage_(
         'Рассчитано позиций для месяца "' + (res.monthLabel || monthKey) + '": ' + (STATE.planCost.results.length || 0) + ', unmatched: ' + ((res.stats && res.stats.unmatchedItems) || 0),
-        'success'
+        'success',
+        (res.stats && res.stats.unmatchedList) || []
       );
     })
     .withFailureHandler(function(err) {
