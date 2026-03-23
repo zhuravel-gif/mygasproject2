@@ -1103,14 +1103,15 @@ function importMappedValues_(payload, targetCol, label, mappingType) {
   var data = sheet.getDataRange().getValues();
   var nameMap = {};
   var articleMap = {};
-  var rawNameMap = {};
+  var supplierNameMap = {};
   var rawColIndex = (typeof COL !== 'undefined' && typeof COL.RAW === 'number') ? COL.RAW : 7;
+  var nameColIndex = (typeof COL !== 'undefined' && typeof COL.NAME === 'number') ? COL.NAME : 0;
   var flakonMap = null;
   if (mappingType === 'supplier' && typeof buildFlakonMap === 'function' && typeof getFlakonList === 'function') {
     flakonMap = buildFlakonMap(getFlakonList());
   }
   for (var rowIndex = 1; rowIndex < data.length; rowIndex++) {
-    var nameKey = normalizeMatchKey_(data[rowIndex][0]);
+    var nameKey = normalizeMatchKey_(data[rowIndex][nameColIndex]);
     var articleKey = normalizeMatchKey_(data[rowIndex][1]);
     var rowType = '';
     if (mappingType === 'supplier') {
@@ -1120,12 +1121,14 @@ function importMappedValues_(payload, targetCol, label, mappingType) {
         rowType = String(data[rowIndex][rawColIndex] || '').trim() ? 'Сырьё' : '';
       }
     }
-    var rawKey = rowType === 'Сырьё' ? normalizeMatchKey_(data[rowIndex][rawColIndex]) : '';
+    var supplierKey = rowType === 'Сырьё'
+      ? normalizeMatchKey_(data[rowIndex][rawColIndex])
+      : nameKey;
     if (nameKey && !nameMap.hasOwnProperty(nameKey)) nameMap[nameKey] = rowIndex;
     if (articleKey && !articleMap.hasOwnProperty(articleKey)) articleMap[articleKey] = rowIndex;
-    if (rawKey) {
-      if (!rawNameMap.hasOwnProperty(rawKey)) rawNameMap[rawKey] = [];
-      rawNameMap[rawKey].push(rowIndex);
+    if (mappingType === 'supplier' && supplierKey) {
+      if (!supplierNameMap.hasOwnProperty(supplierKey)) supplierNameMap[supplierKey] = [];
+      supplierNameMap[supplierKey].push(rowIndex);
     }
   }
 
@@ -1139,8 +1142,8 @@ function importMappedValues_(payload, targetCol, label, mappingType) {
     var articleLookup = normalizeMatchKey_(item.article);
     var targetRows = [];
 
-    if (mappingType === 'supplier' && nameLookup && rawNameMap.hasOwnProperty(nameLookup)) {
-      targetRows = rawNameMap[nameLookup].slice();
+    if (mappingType === 'supplier' && nameLookup && supplierNameMap.hasOwnProperty(nameLookup)) {
+      targetRows = supplierNameMap[nameLookup].slice();
       matchedByName++;
     } else if (nameLookup && nameMap.hasOwnProperty(nameLookup)) {
       targetRows = [nameMap[nameLookup]];
