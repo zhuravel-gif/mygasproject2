@@ -8,6 +8,7 @@ var CFG = {
   BUNDLES: 'Наборы',
   BASIS: 'basis',
   RESULTS: 'Результаты',
+  RESULTS_SNAPSHOT_PREFIX: 'Результаты',
   META: '__meta',
   BASE_FIELDS: [
     { key: 'name', label: 'Номенклатура.Наименование' },
@@ -37,6 +38,66 @@ var CFG = {
   NDS_COL: 16,
   TAX_COL: 17,
   TOTAL_COLS: 18
+};
+
+var COST_RESULT_HEADERS = [
+  'Ключ',
+  'Номенклатура',
+  'Артикул ВБ',
+  'Артикул',
+  'Флакон',
+  'Категория',
+  'Тип',
+  'Товарная группа 1',
+  'Товарная группа 2',
+  'Товарная группа 3',
+  'Основное сырьё',
+  'Сырьё',
+  'Нал+Пош',
+  'Доставка',
+  'Цена флакона в руб.',
+  'Доставка флакона в руб.',
+  'НДС+пошлина флакона',
+  'Этикетка',
+  'Себестоимость флакона',
+  'Итого расчёт',
+  'Ручной расчёт',
+  'Итого ручной',
+  'ИТОГО',
+  'Себес 1С',
+  'Разница',
+  'Разница %',
+  'Обновлено'
+];
+
+var COST_RESULT_COL = {
+  ROW_KEY: 0,
+  NAME: 1,
+  ARTICLE_WB: 2,
+  ARTICLE: 3,
+  FLAKON: 4,
+  CATEGORY: 5,
+  TYPE: 6,
+  GROUP1: 7,
+  GROUP2: 8,
+  GROUP3: 9,
+  RAW_NAME: 10,
+  RAW: 11,
+  TAX_DUTY: 12,
+  DELIVERY: 13,
+  RAW_FL: 14,
+  DELIVERY_FL: 15,
+  TAX_DUTY_FL: 16,
+  LABEL: 17,
+  TOTAL_FL: 18,
+  CALC_TOTAL: 19,
+  MANUAL_MODE: 20,
+  MANUAL_TOTAL: 21,
+  TOTAL: 22,
+  COST_1C: 23,
+  DIFF: 24,
+  DIFF_PCT: 25,
+  UPDATED_AT: 26
 };
 
 var IMPORT_META_KEYS = {
@@ -621,7 +682,7 @@ function refreshBundleSheetComputed_() {
 function saveResults(results) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var timezone = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
-  var sheetName = CFG.RESULTS + ' ' + Utilities.formatDate(new Date(), timezone, 'dd.MM.yyyy HH:mm');
+  var sheetName = CFG.RESULTS_SNAPSHOT_PREFIX + ' ' + Utilities.formatDate(new Date(), timezone, 'dd.MM.yyyy HH:mm');
   var sheet = ss.insertSheet(sheetName);
 
   var headers = [
@@ -679,6 +740,264 @@ function saveResults(results) {
   }
 
   return { success: true, sheetName: sheetName, count: results.length };
+}
+
+function getCostState() {
+  try {
+    var rows = getStoredCostResults_();
+    if (!rows.length) {
+      var data = getData();
+      if (!data.rows || !data.rows.length) {
+        return { success: true, results: [], count: 0, stats: { raw: 0, finished: 0, flakons: 0, sets: 0, totalCost: 0, total1C: 0 } };
+      }
+      return recalculateAndStoreCostResults(getParams());
+    }
+
+    return {
+      success: true,
+      results: rows,
+      count: rows.length,
+      stats: buildStoredCostStats_(rows),
+      updatedAt: rows[0] && rows[0].updatedAt ? rows[0].updatedAt : ''
+    };
+  } catch (err) {
+    return { success: false, message: 'Не удалось загрузить расчёт себестоимости: ' + err.message, diagnostic: err.stack || '' };
+  }
+}
+
+function recalculateAndStoreCostResults(params) {
+  try {
+    var calc = calculateAll(params || getParams());
+    if (!calc || !calc.success) return calc || { success: false, message: 'Не удалось пересчитать себестоимость.' };
+
+    writeStoredCostResults_(calc.results || []);
+    var rows = getStoredCostResults_();
+    return {
+      success: true,
+      results: rows,
+      count: rows.length,
+      stats: buildStoredCostStats_(rows),
+      updatedAt: rows[0] && rows[0].updatedAt ? rows[0].updatedAt : ''
+    };
+  } catch (err) {
+    return { success: false, message: 'Не удалось пересчитать себестоимость: ' + err.message, diagnostic: err.stack || '' };
+  }
+}
+
+function saveCostManualOverride(payload) {
+  try {
+    payload = payload || {};
+    var rowKey = String(payload.rowKey || '').trim();
+    if (!rowKey) return { success: false, message: 'Не указан ключ строки для ручного расчёта.' };
+
+    var rows = getStoredCostResults_();
+    var targetIndex = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].rowKey || '') === rowKey) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex < 0) return { success: false, message: 'Строка себестоимости не найдена.' };
+
+    var row = rows[targetIndex];
+    var manualMode = !!payload.manualMode;
+    row.manualMode = manualMode;
+    row.manualTotal = manualMode ? round2_(toNumber_(payload.manualTotal, row.calcTotal || row.total || 0)) : '';
+    row.total = manualMode ? row.manualTotal : round2_(toNumber_(row.calcTotal, row.total || 0));
+    row.diff = row.cost1C > 0 ? round2_(row.total - row.cost1C) : 0;
+    row.diffPct = row.cost1C > 0 ? round4_((row.total - row.cost1C) / row.cost1C) : 0;
+    row.updatedAt = new Date().toISOString();
+
+    writeStoredCostResults_(rows);
+    return { success: true, row: row };
+  } catch (err) {
+    return { success: false, message: 'Не удалось сохранить ручную себестоимость: ' + err.message, diagnostic: err.stack || '' };
+  }
+}
+
+function getStoredCostResults_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.RESULTS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  var values = sheet.getDataRange().getValues();
+  if (!values.length || !isCurrentCostResultsSchema_(values[0])) return [];
+  var rows = [];
+  for (var i = 1; i < values.length; i++) {
+    var item = normalizeStoredCostResultRow_(values[i]);
+    if (!item.name) continue;
+    rows.push(item);
+  }
+  return rows;
+}
+
+function getCostOverrideMap_() {
+  var rows = getStoredCostResults_();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!row.manualMode || !hasValue_(row.manualTotal)) continue;
+    var keys = getCostLookupKeys_(row.name, row.articleWb, row.article);
+    for (var j = 0; j < keys.length; j++) map[keys[j]] = { manualMode: true, manualTotal: row.manualTotal };
+  }
+  return map;
+}
+
+function writeStoredCostResults_(results) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CFG.RESULTS);
+  if (!sheet) sheet = ss.insertSheet(CFG.RESULTS);
+
+  var existingManualMap = getStoredCostManualMap_();
+  var nowIso = new Date().toISOString();
+  var rows = [COST_RESULT_HEADERS];
+
+  for (var i = 0; i < results.length; i++) {
+    var item = results[i] || {};
+    var rowKey = buildCostResultKey_(item.name, item.articleWb, item.article);
+    var existingManual = existingManualMap[rowKey] || null;
+    var manualMode = item.manualMode === true || (existingManual && existingManual.manualMode);
+    var calcTotal = round2_(toNumber_(item.calcTotal, item.total));
+    var manualTotal = manualMode
+      ? round2_(toNumber_(item.manualTotal, existingManual ? existingManual.manualTotal : calcTotal))
+      : '';
+    var total = manualMode ? manualTotal : round2_(toNumber_(item.total, calcTotal));
+    var cost1C = round2_(toNumber_(item.cost1C, 0));
+    var diff = cost1C > 0 ? round2_(total - cost1C) : 0;
+    var diffPct = cost1C > 0 ? round4_((total - cost1C) / cost1C) : 0;
+
+    rows.push([
+      rowKey,
+      item.name || '',
+      item.articleWb || '',
+      item.article || '',
+      item.flakonName || '',
+      item.category || '',
+      item.type || '',
+      item.group1 || '',
+      item.group2 || '',
+      item.group3 || '',
+      item.rawName || '',
+      round2_(toNumber_(item.raw, 0)),
+      round2_(toNumber_(item.taxDuty, 0)),
+      round2_(toNumber_(item.delivery, 0)),
+      round2_(toNumber_(item.rawFl, 0)),
+      round2_(toNumber_(item.deliveryFl, 0)),
+      round2_(toNumber_(item.taxDutyFl, 0)),
+      round2_(toNumber_(item.label, 0)),
+      round2_(toNumber_(item.totalFl, 0)),
+      calcTotal,
+      manualMode ? 'Да' : '',
+      manualMode ? manualTotal : '',
+      total,
+      cost1C,
+      diff,
+      diffPct,
+      nowIso
+    ]);
+  }
+
+  sheet.clear();
+  sheet.getRange(1, 1, rows.length, COST_RESULT_HEADERS.length).setValues(rows);
+  formatStoredCostSheet_(sheet, rows.length - 1);
+}
+
+function getStoredCostManualMap_() {
+  var rows = getStoredCostResults_();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) {
+    map[rows[i].rowKey] = { manualMode: !!rows[i].manualMode, manualTotal: rows[i].manualTotal };
+  }
+  return map;
+}
+
+function normalizeStoredCostResultRow_(row) {
+  return {
+    rowKey: String(row[COST_RESULT_COL.ROW_KEY] || '').trim(),
+    name: String(row[COST_RESULT_COL.NAME] || '').trim(),
+    articleWb: String(row[COST_RESULT_COL.ARTICLE_WB] || '').trim(),
+    article: String(row[COST_RESULT_COL.ARTICLE] || '').trim(),
+    flakonName: String(row[COST_RESULT_COL.FLAKON] || '').trim(),
+    category: String(row[COST_RESULT_COL.CATEGORY] || '').trim(),
+    type: String(row[COST_RESULT_COL.TYPE] || '').trim(),
+    group1: String(row[COST_RESULT_COL.GROUP1] || '').trim(),
+    group2: String(row[COST_RESULT_COL.GROUP2] || '').trim(),
+    group3: String(row[COST_RESULT_COL.GROUP3] || '').trim(),
+    rawName: String(row[COST_RESULT_COL.RAW_NAME] || '').trim(),
+    raw: round2_(toNumber_(row[COST_RESULT_COL.RAW], 0)),
+    taxDuty: round2_(toNumber_(row[COST_RESULT_COL.TAX_DUTY], 0)),
+    delivery: round2_(toNumber_(row[COST_RESULT_COL.DELIVERY], 0)),
+    rawFl: round2_(toNumber_(row[COST_RESULT_COL.RAW_FL], 0)),
+    deliveryFl: round2_(toNumber_(row[COST_RESULT_COL.DELIVERY_FL], 0)),
+    taxDutyFl: round2_(toNumber_(row[COST_RESULT_COL.TAX_DUTY_FL], 0)),
+    label: round2_(toNumber_(row[COST_RESULT_COL.LABEL], 0)),
+    totalFl: round2_(toNumber_(row[COST_RESULT_COL.TOTAL_FL], 0)),
+    calcTotal: round2_(toNumber_(row[COST_RESULT_COL.CALC_TOTAL], 0)),
+    manualMode: String(row[COST_RESULT_COL.MANUAL_MODE] || '').trim() === 'Да',
+    manualTotal: row[COST_RESULT_COL.MANUAL_TOTAL] === '' || row[COST_RESULT_COL.MANUAL_TOTAL] === null || row[COST_RESULT_COL.MANUAL_TOTAL] === undefined
+      ? ''
+      : round2_(toNumber_(row[COST_RESULT_COL.MANUAL_TOTAL], 0)),
+    total: round2_(toNumber_(row[COST_RESULT_COL.TOTAL], 0)),
+    cost1C: round2_(toNumber_(row[COST_RESULT_COL.COST_1C], 0)),
+    diff: round2_(toNumber_(row[COST_RESULT_COL.DIFF], 0)),
+    diffPct: round4_(toNumber_(row[COST_RESULT_COL.DIFF_PCT], 0)),
+    updatedAt: String(row[COST_RESULT_COL.UPDATED_AT] || '').trim()
+  };
+}
+
+function buildStoredCostStats_(results) {
+  var stats = { raw: 0, finished: 0, flakons: 0, sets: 0, totalCost: 0, total1C: 0 };
+  for (var i = 0; i < results.length; i++) {
+    var item = results[i];
+    if (item.type === 'Сырьё') stats.raw++;
+    else if (item.type === 'Готовый товар') stats.finished++;
+    else if (item.type === 'Флакон') stats.flakons++;
+    else if (item.type === 'Наборы') stats.sets++;
+    stats.totalCost += toNumber_(item.total, 0);
+    stats.total1C += toNumber_(item.cost1C, 0);
+  }
+  stats.totalCost = round2_(stats.totalCost);
+  stats.total1C = round2_(stats.total1C);
+  return stats;
+}
+
+function formatStoredCostSheet_(sheet, rowCount) {
+  sheet.getRange(1, 1, 1, COST_RESULT_HEADERS.length)
+    .setFontWeight('bold')
+    .setBackground('#4a86c8')
+    .setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+
+  if (rowCount > 0) {
+    sheet.getRange(2, COST_RESULT_COL.RAW + 1, rowCount, 14).setNumberFormat('#,##0.00');
+    sheet.getRange(2, COST_RESULT_COL.DIFF_PCT + 1, rowCount, 1).setNumberFormat('0.0%');
+  }
+}
+
+function getCostLookupKeys_(name, articleWb, article) {
+  var keys = [];
+  var wbKey = normalizeMatchKey_(articleWb);
+  var articleKey = normalizeMatchKey_(article);
+  var nameKey = normalizeMatchKey_(name);
+  if (wbKey) keys.push('wb:' + wbKey);
+  if (articleKey) keys.push('art:' + articleKey);
+  if (nameKey) keys.push('name:' + nameKey);
+  return keys;
+}
+
+function buildCostResultKey_(name, articleWb, article) {
+  return [
+    normalizeMatchKey_(name),
+    normalizeMatchKey_(articleWb),
+    normalizeMatchKey_(article)
+  ].join('|');
+}
+
+function isCurrentCostResultsSchema_(headers) {
+  if (!headers || headers.length < COST_RESULT_HEADERS.length) return false;
+  return String(headers[0] || '').trim() === COST_RESULT_HEADERS[0] &&
+    String(headers[COST_RESULT_COL.TOTAL] || '').trim() === COST_RESULT_HEADERS[COST_RESULT_COL.TOTAL];
 }
 
 function importNomenclature(data, ndsDefault, taxDefault) {

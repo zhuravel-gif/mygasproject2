@@ -139,6 +139,7 @@ function buildBundleContext_(params, flakonMap, dataRows) {
     dataRows: dataRows || [],
     dataRowMap: dataRowMap,
     bundles: bundles,
+    overrideMap: typeof getCostOverrideMap_ === 'function' ? getCostOverrideMap_() : {},
     cache: {}
   };
 }
@@ -158,6 +159,35 @@ function buildBundleItemSource_(calcCost, manualCost, detailsSource) {
   if (calcCost > 0) return detailsSource || 'Расчёт';
   if (manualCost > 0) return 'Ручная стоимость';
   return 'Нет данных';
+}
+
+function getCostOverrideForRow_(row, overrideMap) {
+  if (!row || !overrideMap) return null;
+  var keys = typeof getCostLookupKeys_ === 'function'
+    ? getCostLookupKeys_(row[COL.NAME], row[COL.ART_WB], row[COL.ART])
+    : [];
+
+  for (var i = 0; i < keys.length; i++) {
+    if (overrideMap.hasOwnProperty(keys[i])) return overrideMap[keys[i]];
+  }
+  return null;
+}
+
+function applyCostOverrideToResult_(result, row, overrideMap) {
+  result.calcTotal = round2_(toNumber_(result.calcTotal, result.total));
+  result.manualMode = false;
+  result.manualTotal = '';
+
+  var override = getCostOverrideForRow_(row, overrideMap);
+  if (!override || !override.manualMode) return result;
+
+  var manualTotal = round2_(toNumber_(override.manualTotal, result.calcTotal));
+  result.manualMode = true;
+  result.manualTotal = manualTotal;
+  result.total = manualTotal;
+  result.diff = result.cost1C > 0 ? round2_(result.total - result.cost1C) : 0;
+  result.diffPct = result.cost1C > 0 ? round4_((result.total - result.cost1C) / result.cost1C) : 0;
+  return result;
 }
 
 function calculateNamedCostInfo_(name, bundleContext, stack) {
@@ -185,6 +215,19 @@ function calculateNamedCostInfo_(name, bundleContext, stack) {
   var result;
 
   if (row) {
+    var override = getCostOverrideForRow_(row, bundleContext.overrideMap);
+    if (override && override.manualMode) {
+      result = {
+        total: round2_(toNumber_(override.manualTotal, 0)),
+        source: 'Ручной расчёт итоговой себестоимости',
+        type: determineType(row, bundleContext.flakonMap),
+        specification: '',
+        items: []
+      };
+      bundleContext.cache[key] = result;
+      return result;
+    }
+
     var type = determineType(row, bundleContext.flakonMap);
     if (type === 'Наборы') {
       result = calculateBundleCostByName_(String(row[COL.NAME] || name), row, bundleContext, nextStack);
@@ -404,6 +447,8 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
 
   var result = {
     name: name,
+    article: String(row[COL.ART] || '').trim(),
+    articleWb: String(row[COL.ART_WB] || '').trim(),
     flakonName: flakonNameSource,
     category: category,
     group1: String(row[COL.GRP1] || '').trim(),
@@ -419,6 +464,9 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
     taxDutyFl: 0,
     label: 0,
     totalFl: 0,
+    calcTotal: 0,
+    manualMode: false,
+    manualTotal: '',
     total: 0,
     cost1C: cost1C,
     diff: 0,
@@ -431,11 +479,12 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
     var runtimeContext = bundleContext || buildBundleContext_(params, flakonMap, getData().rows || []);
     var bundleCalc = calculateBundleCostByName_(name, row, runtimeContext, stack || {});
     result.total = round2_(bundleCalc.total);
+    result.calcTotal = result.total;
     result.bundleSpec = bundleCalc.specification || '';
     result.bundleItems = bundleCalc.items || [];
     result.diff = cost1C > 0 ? round2_(result.total - cost1C) : 0;
     result.diffPct = cost1C > 0 ? round4_((result.total - cost1C) / cost1C) : 0;
-    return result;
+    return applyCostOverrideToResult_(result, row, runtimeContext.overrideMap);
   }
 
   if (type === 'Флакон') {
@@ -494,11 +543,16 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
     result.delivery +
     result.totalFl
   );
+  result.calcTotal = result.total;
 
   result.diff = cost1C > 0 ? round2_(result.total - cost1C) : 0;
   result.diffPct = cost1C > 0 ? round4_((result.total - cost1C) / cost1C) : 0;
 
-  return result;
+  var overrideMap = bundleContext && bundleContext.overrideMap
+    ? bundleContext.overrideMap
+    : (typeof getCostOverrideMap_ === 'function' ? getCostOverrideMap_() : {});
+
+  return applyCostOverrideToResult_(result, row, overrideMap);
 }
 
 function calculateAll(params) {
@@ -674,11 +728,6 @@ function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonName
       formula: labelSourceText,
       result: result.label.toFixed(2)
     });
-    steps.push({
-      title: 'Себестоимость флакона',
-      formula: 'Цена флакона + Доставка флакона + НДС+пошлина + Этикетка',
-      result: result.totalFl.toFixed(2)
-    });
   } else {
     steps.push({
       title: 'Сырьё',
@@ -714,11 +763,6 @@ function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonName
       title: 'Этикетка',
       formula: labelSourceText,
       result: result.label.toFixed(2)
-    });
-    steps.push({
-      title: 'Себестоимость флакона',
-      formula: 'Цена флакона + Доставка флакона + НДС+пошлина + Этикетка',
-      result: result.totalFl.toFixed(2)
     });
   }
 
