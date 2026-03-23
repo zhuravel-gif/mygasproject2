@@ -2,7 +2,14 @@
  * Main entry points for Apps Script WebApp.
  */
 
-function doGet() {
+function doGet(e) {
+  var debugMode = e && e.parameter ? String(e.parameter.debug || '').trim() : '';
+  if (debugMode === 'plan-state') {
+    return ContentService
+      .createTextOutput(JSON.stringify(buildPlanStateDebugPayload_(), null, 2))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   return HtmlService.createTemplateFromFile('WebApp')
     .evaluate()
     .setTitle('Калькулятор себестоимости')
@@ -162,4 +169,50 @@ function resetSheetProtections_(sheet) {
       protection.remove();
     } catch (e) {}
   });
+}
+
+function buildPlanStateDebugPayload_() {
+  var payload = {
+    timestamp: new Date().toISOString(),
+    scriptVersion: 'plan-state-debug-endpoint'
+  };
+
+  try {
+    payload.state = typeof getPlanCostState === 'function'
+      ? getPlanCostState()
+      : { success: false, message: 'getPlanCostState недоступна.' };
+  } catch (stateErr) {
+    payload.state = {
+      success: false,
+      message: stateErr && stateErr.message ? String(stateErr.message) : 'Ошибка вызова getPlanCostState.',
+      stack: stateErr && stateErr.stack ? String(stateErr.stack) : ''
+    };
+  }
+
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('План затрат');
+    payload.planSheet = sheet ? {
+      exists: true,
+      type: sheet.getType ? String(sheet.getType()) : 'GRID',
+      lastRow: sheet.getLastRow(),
+      lastColumn: sheet.getLastColumn(),
+      header: sheet.getLastRow() >= 1 ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getDisplayValues()[0] : []
+    } : { exists: false };
+  } catch (sheetErr) {
+    payload.planSheet = {
+      exists: false,
+      error: sheetErr && sheetErr.message ? String(sheetErr.message) : 'Не удалось прочитать лист "План затрат".',
+      stack: sheetErr && sheetErr.stack ? String(sheetErr.stack) : ''
+    };
+  }
+
+  try {
+    payload.metaPreview = typeof getMetaValue_ === 'function'
+      ? String(getMetaValue_('plan.importConfig') || '').slice(0, 4000)
+      : 'getMetaValue_ недоступна.';
+  } catch (metaErr) {
+    payload.metaPreview = 'META_ERROR: ' + (metaErr && metaErr.message ? String(metaErr.message) : metaErr);
+  }
+
+  return payload;
 }
