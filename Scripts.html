@@ -1037,9 +1037,11 @@ var COST_SLICER_FIELDS = [
 STATE.costFilters = STATE.costFilters || {};
 STATE.costSort = STATE.costSort || { key: null, dir: 'asc' };
 STATE.costLoaded = STATE.costLoaded || false;
+STATE.costDirty = STATE.costDirty || false;
 
 function runCalculation() {
   var p = getParamsFromUI();
+  var currentRows = getCurrentCostRows_();
   showLoading();
   setStatus('cost-status', 'Пересчитываю себестоимость...', 'info');
   google.script.run
@@ -1048,7 +1050,8 @@ function runCalculation() {
       if (!res || !res.success) { setStatus('cost-status', (res && res.message) || 'Не удалось пересчитать себестоимость.', 'error'); return; }
       STATE.costLoaded = true;
       STATE.calcResults = res.results || [];
-      setStatus('cost-status', 'Пересчитано ' + res.count + ' позиций', 'success');
+      STATE.costDirty = true;
+      setStatus('cost-status', 'Пересчитано ' + res.count + ' позиций. Нажмите «Сохранить изменения», чтобы записать текущую версию на сервер.', 'success');
       renderCostTable(res.results);
       renderCostStats(res.results);
     })
@@ -1056,7 +1059,10 @@ function runCalculation() {
       hideLoading();
       setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
     })
-    .recalculateAndStoreCostResults(p);
+    .recalculateCostResults({
+      params: p,
+      currentRows: currentRows
+    });
 }
 
 function loadCostStateUI() {
@@ -1072,6 +1078,7 @@ function loadCostStateUI() {
         return;
       }
       STATE.costLoaded = true;
+      STATE.costDirty = false;
       STATE.calcResults = res.results || [];
       renderCostTable(STATE.calcResults);
       renderCostStats(STATE.calcResults);
@@ -1419,45 +1426,48 @@ function renderCostRows(results) {
   }
 }
 
-function syncCostManualOverride_(rowData, table) {
-  if (!rowData || !rowData.rowKey) return;
-  showLoading();
-  setStatus('cost-status', 'Сохраняю ручную себестоимость...', 'info');
-  google.script.run
-    .withSuccessHandler(function(res) {
-      hideLoading();
-      if (!res || !res.success) {
-        setStatus('cost-status', (res && res.message) || 'Не удалось сохранить ручную себестоимость.', 'error');
-        loadCostStateUI();
-        return;
-      }
+function getCurrentCostRows_() {
+  if (STATE.tables.cost) return STATE.tables.cost.getData();
+  return (STATE.calcResults || []).slice();
+}
 
-      var updated = res.row || rowData;
-      if (table) {
-        var row = table.getRow(updated.rowKey);
-        if (row) row.update(updated);
-      }
+function updateCostRowInState_(updatedRow) {
+  if (!updatedRow || !updatedRow.rowKey) return;
+  for (var i = 0; i < STATE.calcResults.length; i++) {
+    if (STATE.calcResults[i].rowKey === updatedRow.rowKey) {
+      STATE.calcResults[i] = Object.assign({}, STATE.calcResults[i], updatedRow);
+      return;
+    }
+  }
+}
 
-      for (var i = 0; i < STATE.calcResults.length; i++) {
-        if (STATE.calcResults[i].rowKey === updated.rowKey) {
-          STATE.calcResults[i] = Object.assign({}, STATE.calcResults[i], updated);
-          break;
-        }
-      }
+function normalizeCostRowEdit_(rowData) {
+  if (!rowData) return rowData;
+  rowData.calcTotal = parseFloat(rowData.calcTotal) || 0;
+  rowData.cost1C = parseFloat(rowData.cost1C) || 0;
+  rowData.manualMode = !!rowData.manualMode;
+  if (rowData.manualMode) {
+    var manualTotal = parseFloat(rowData.total);
+    if (isNaN(manualTotal)) manualTotal = parseFloat(rowData.manualTotal);
+    if (isNaN(manualTotal)) manualTotal = rowData.calcTotal;
+    rowData.manualTotal = manualTotal;
+    rowData.total = manualTotal;
+  } else {
+    rowData.manualTotal = '';
+    rowData.total = rowData.calcTotal;
+  }
+  rowData.diff = rowData.cost1C > 0 ? rowData.total - rowData.cost1C : 0;
+  rowData.diffPct = rowData.cost1C > 0 ? (rowData.total - rowData.cost1C) / rowData.cost1C : 0;
+  return rowData;
+}
 
-      renderCostStats(STATE.calcResults);
-      setStatus('cost-status', 'Ручная себестоимость сохранена', 'success');
-    })
-    .withFailureHandler(function(err) {
-      hideLoading();
-      setStatus('cost-status', 'Ошибка сохранения ручной себестоимости: ' + err.message, 'error');
-      loadCostStateUI();
-    })
-    .saveCostManualOverride({
-      rowKey: rowData.rowKey,
-      manualMode: !!rowData.manualMode,
-      manualTotal: rowData.manualMode ? rowData.total : ''
-    });
+function applyLocalCostEdit_(rowComponent, rowData) {
+  var normalized = normalizeCostRowEdit_(Object.assign({}, rowData));
+  if (rowComponent) rowComponent.update(normalized);
+  updateCostRowInState_(normalized);
+  STATE.costDirty = true;
+  renderCostStats(getCurrentCostRows_());
+  setStatus('cost-status', 'Есть несохранённые изменения. Нажмите «Сохранить изменения».', 'info');
 }
 
 function renderCostTable(results) {
@@ -1509,8 +1519,7 @@ function renderCostTable(results) {
         return !!cell.getRow().getData().manualMode;
       };
       colDef.cellEdited = function(cell) {
-        var rowData = cell.getRow().getData();
-        syncCostManualOverride_(rowData, cell.getTable());
+        applyLocalCostEdit_(cell.getRow(), cell.getRow().getData());
       };
       colDef.headerFilter = 'input';
       colDef.headerFilterPlaceholder = 'Итого...';
@@ -1528,11 +1537,7 @@ function renderCostTable(results) {
       };
       colDef.cellEdited = function(cell) {
         var rowData = cell.getRow().getData();
-        if (rowData.manualMode && (rowData.total === null || rowData.total === undefined || rowData.total === '')) {
-          rowData.total = rowData.calcTotal || 0;
-          cell.getRow().update({ total: rowData.total });
-        }
-        syncCostManualOverride_(rowData, cell.getTable());
+        applyLocalCostEdit_(cell.getRow(), rowData);
       };
     } else if (col.key === 'diff') {
       colDef.hozAlign = 'right';
@@ -1643,20 +1648,32 @@ function exportCostExcel() {
 
 function saveResultsUI() {
   if (!STATE.calcResults || STATE.calcResults.length === 0) {
-    setStatus('cost-status', 'Сначала выполните расчёт', 'error');
+    setStatus('cost-status', 'Сначала загрузите или пересчитайте себестоимость', 'error');
     return;
   }
   showLoading();
+  setStatus('cost-status', 'Сохраняю текущую версию себестоимости...', 'info');
   google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
-      setStatus('cost-status', 'Записано ' + res.count + ' строк на лист "' + res.sheetName + '"', 'success');
+      if (!res || !res.success) {
+        setStatus('cost-status', (res && res.message) || 'Не удалось сохранить изменения.', 'error');
+        return;
+      }
+      STATE.costDirty = false;
+      STATE.costLoaded = true;
+      STATE.calcResults = res.results || STATE.calcResults;
+      renderCostTable(STATE.calcResults);
+      renderCostStats(STATE.calcResults);
+      setStatus('cost-status', 'Изменения сохранены' + (res.updatedAt ? ' | обновлено: ' + res.updatedAt : ''), 'success');
     })
     .withFailureHandler(function(err) {
       hideLoading();
       setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
     })
-    .saveResults(STATE.calcResults, getParamsFromUI());
+    .saveCostState({
+      results: getCurrentCostRows_()
+    });
 }
 
 // ============================================================
