@@ -52,6 +52,33 @@ function setStatus(id, msg, type) {
   }
 }
 
+function normalizePlanErrorText_(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function buildPlanStatusError_(message, diagnostic, errorName) {
+  var parts = [];
+  var cleanMessage = normalizePlanErrorText_(message) || 'Ошибка операции плана.';
+  parts.push(cleanMessage);
+  var cleanName = normalizePlanErrorText_(errorName);
+  var cleanDiagnostic = normalizePlanErrorText_(diagnostic);
+  if (cleanName) parts.push('Тип: ' + cleanName);
+  if (cleanDiagnostic) parts.push('Диагностика: ' + cleanDiagnostic);
+  return parts.join(' | ');
+}
+
+function buildPlanThrownErrorText_(prefix, err) {
+  var message = (err && err.message) ? err.message : prefix;
+  var diagnostic = '';
+  if (err) {
+    if (err.stack) diagnostic = err.stack;
+    else if (err.details) diagnostic = err.details;
+    else if (typeof err === 'string') diagnostic = err;
+  }
+  return buildPlanStatusError_(prefix ? (prefix + ': ' + message) : message, diagnostic, err && err.name);
+}
+
 function toggleImportGuide() {
   var guide = document.getElementById('import-guide');
   if (!guide) return;
@@ -1589,51 +1616,212 @@ function calcManual() {
     .calculateManual(input);
 }
 
+function formatPctValue_(value, total) {
+  if (!total || total <= 0) return '0.0%';
+  return ((value / total) * 100).toFixed(1) + '%';
+}
+
+function buildCalcShareGroups_(result) {
+  var total = parseFloat(result && result.total) || 0;
+  var rawTotal = (parseFloat(result.raw) || 0) + (parseFloat(result.delivery) || 0) + (parseFloat(result.taxDuty) || 0);
+  var flakonTotal = (parseFloat(result.rawFl) || 0) + (parseFloat(result.deliveryFl) || 0) + (parseFloat(result.taxDutyFl) || 0);
+  var labelTotal = parseFloat(result.label) || 0;
+
+  return [
+    {
+      key: 'raw',
+      title: 'Сырьевой контур',
+      total: rawTotal,
+      color: '#c2410c',
+      subs: [
+        { title: 'Сырьё', value: parseFloat(result.raw) || 0, color: '#ea580c' },
+        { title: 'Доставка сырья', value: parseFloat(result.delivery) || 0, color: '#fb923c' },
+        { title: 'Налоги и пошлины', value: parseFloat(result.taxDuty) || 0, color: '#fdba74' }
+      ]
+    },
+    {
+      key: 'flakon',
+      title: 'Флакон и тара',
+      total: flakonTotal,
+      color: '#0369a1',
+      subs: [
+        { title: 'Цена флакона', value: parseFloat(result.rawFl) || 0, color: '#0284c7' },
+        { title: 'Доставка флакона', value: parseFloat(result.deliveryFl) || 0, color: '#38bdf8' },
+        { title: 'НДС и пошлина флакона', value: parseFloat(result.taxDutyFl) || 0, color: '#7dd3fc' }
+      ]
+    },
+    {
+      key: 'label',
+      title: 'Этикетка',
+      total: labelTotal,
+      color: '#6d28d9',
+      subs: [
+        { title: 'Этикетка', value: labelTotal, color: '#8b5cf6' }
+      ]
+    }
+  ].map(function(group) {
+    group.pct = total > 0 ? (group.total / total) * 100 : 0;
+    return group;
+  });
+}
+
+function buildCalcResultHtml_(payload) {
+  var result = payload.result || {};
+  var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
+  var total = parseFloat(result.total) || 0;
+  var flakonTotal = parseFloat(result.totalFl) || 0;
+  var summaryHtml =
+    '<div class="calc-summary-grid">' +
+      '<div class="calc-summary-card">' +
+        '<span class="calc-summary-label">Итого</span>' +
+        '<strong>' + fmt(total) + ' ₽</strong>' +
+        '<div class="calc-summary-note">Полная себестоимость позиции</div>' +
+      '</div>' +
+      '<div class="calc-summary-card">' +
+        '<span class="calc-summary-label">Тип</span>' +
+        '<strong>' + esc(result.type || payload.type || '—') + '</strong>' +
+        '<div class="calc-summary-note">Определён по текущим полям</div>' +
+      '</div>' +
+      '<div class="calc-summary-card">' +
+        '<span class="calc-summary-label">Себестоимость флакона</span>' +
+        '<strong>' + fmt(flakonTotal) + ' ₽</strong>' +
+        '<div class="calc-summary-note">Сумма упаковочного контура</div>' +
+      '</div>' +
+      '<div class="calc-summary-card">' +
+        '<span class="calc-summary-label">Сравнение с 1С</span>' +
+        '<strong class="' + diffClass + '">' + (result.cost1C > 0 ? ((result.diff > 0 ? '+' : '') + fmt(result.diff)) : '—') + '</strong>' +
+        '<div class="calc-summary-note">' + (result.cost1C > 0 ? ('1С: ' + fmt(result.cost1C) + ' ₽') : 'Значение 1С не задано') + '</div>' +
+      '</div>' +
+    '</div>';
+
+  var tableHtml =
+    '<table>' +
+      '<tr><td>Тип</td><td><b>' + esc(result.type || payload.type || '') + '</b></td></tr>' +
+      '<tr><td>Сырьё</td><td class="num">' + fmt(result.raw) + '</td></tr>' +
+      '<tr><td>Нал+Пош</td><td class="num">' + fmt(result.taxDuty) + '</td></tr>' +
+      '<tr><td>Доставка</td><td class="num">' + fmt(result.delivery) + '</td></tr>' +
+      '<tr><td>Цена флакона</td><td class="num">' + fmt(result.rawFl) + '</td></tr>' +
+      '<tr><td>Доставка флакона</td><td class="num">' + fmt(result.deliveryFl) + '</td></tr>' +
+      '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(result.taxDutyFl) + '</td></tr>' +
+      '<tr><td>Этикетка</td><td class="num">' + fmt(result.label) + '</td></tr>' +
+      '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(result.totalFl) + '</td></tr>' +
+      '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(result.total) + ' ₽</td></tr>' +
+      (result.cost1C > 0
+        ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(result.cost1C) + '</td></tr>' +
+          '<tr class="diff-row"><td>Разница</td><td class="num ' + diffClass + '">' +
+          (result.diff > 0 ? '+' : '') + fmt(result.diff) + ' (' + (result.diffPct * 100).toFixed(1) + '%)</td></tr>'
+        : '') +
+    '</table>';
+
+  var stepsHtml = '';
+  for (var i = 0; i < (payload.steps || []).length; i++) {
+    var step = payload.steps[i];
+    stepsHtml +=
+      '<div class="calc-step-item">' +
+        '<div class="calc-step-head">' +
+          '<div class="calc-step-title">' + (i + 1) + '. ' + esc(step.title) + '</div>' +
+          '<div class="calc-step-result">' + esc(step.result) + (step.title === 'ИТОГО' ? ' ₽' : '') + '</div>' +
+        '</div>' +
+        (step.formula ? '<div class="calc-step-formula">' + esc(step.formula) + '</div>' : '') +
+      '</div>';
+  }
+
+  var metaHtml = '';
+  if (payload.params) {
+    metaHtml =
+      '<p class="calc-meta-line">' +
+      'USD=' + payload.params.usd +
+      ' | RMB=' + payload.params.rmb +
+      ' | Лог=' + payload.params.log +
+      ' | Ком=' + payload.params.com +
+      ' | Лог_fl=' + payload.params.logFl +
+      ' | Ком_fl=' + payload.params.comFl +
+      ' | НДС=' + (payload.params.ndsRate * 100).toFixed(1) + '%' +
+      ' | Пошлина=' + (payload.params.taxRate * 100).toFixed(1) + '%' +
+      '</p>';
+  }
+
+  return summaryHtml +
+    metaHtml +
+    '<div class="calc-detail-grid">' +
+      '<div class="calc-detail-card">' +
+        '<h4>Итоговая детализация</h4>' +
+        tableHtml +
+      '</div>' +
+      '<div class="calc-detail-card">' +
+        '<h4>Шаги расчёта</h4>' +
+        '<div class="calc-steps-list">' + stepsHtml + '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+function buildCalcVisualHtml_(result) {
+  var total = parseFloat(result && result.total) || 0;
+  var groups = buildCalcShareGroups_(result).filter(function(group) { return group.total > 0; });
+  if (!groups.length || total <= 0) {
+    return '<p class="hint">После расчёта здесь появится структура затрат по долям и вложенным статьям.</p>';
+  }
+
+  var html =
+    '<div class="calc-visual-head">' +
+      '<div>' +
+        '<h3>Структура затрат</h3>' +
+        '<p class="calc-visual-subtitle">Верхний уровень показывает долю крупных контуров, внутри каждого блока раскрыты младшие статьи.</p>' +
+      '</div>' +
+      '<div class="calc-summary-note">База для долей: ' + fmt(total) + ' ₽</div>' +
+    '</div>' +
+    '<div class="calc-share-list">';
+
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    html +=
+      '<div class="calc-share-card">' +
+        '<div class="calc-share-header">' +
+          '<div class="calc-share-title">' + esc(group.title) + '</div>' +
+          '<div class="calc-share-values">' +
+            '<span class="calc-share-sum">' + fmt(group.total) + ' ₽</span>' +
+            '<span class="calc-share-pct">' + formatPctValue_(group.total, total) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="calc-share-bar">';
+
+    for (var s = 0; s < group.subs.length; s++) {
+      var sub = group.subs[s];
+      if (sub.value <= 0) continue;
+      html += '<span class="calc-share-fill" style="width:' + (group.total > 0 ? ((sub.value / group.total) * 100).toFixed(2) : 0) + '%; background:' + sub.color + '"></span>';
+    }
+
+    html +=
+        '</div>' +
+        '<div class="calc-subshare-list">';
+
+    for (var j = 0; j < group.subs.length; j++) {
+      var item = group.subs[j];
+      if (item.value <= 0) continue;
+      html +=
+        '<div class="calc-subshare-row">' +
+          '<div class="calc-subshare-label">' + esc(item.title) + '</div>' +
+          '<div class="calc-subshare-track"><div class="calc-subshare-fill" style="width:' + (group.total > 0 ? ((item.value / group.total) * 100).toFixed(2) : 0) + '%; background:' + item.color + '"></div></div>' +
+          '<div class="calc-subshare-value">' + fmt(item.value) + ' ₽ · ' + formatPctValue_(item.value, total) + '</div>' +
+        '</div>';
+    }
+
+    html +=
+        '</div>' +
+      '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
 function renderCalcResult(r) {
   var payload = r && r.result ? r : { result: r, steps: [], params: null, type: r ? r.type : '' };
   var result = payload.result || {};
   var el = document.getElementById('calc-result');
-  var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
-  if (el) {
-    el.style.background = result.diff > 0 ? 'linear-gradient(135deg, #fef2f2, #fff)' :
-                           result.diff < 0 ? 'linear-gradient(135deg, #f0fdf4, #fff)' : '';
-  }
-  var html =
-    '<table>' +
-    '<tr><td>Тип</td><td><b>' + esc(result.type || payload.type || '') + '</b></td></tr>' +
-    '<tr><td>Сырьё</td><td class="num">' + fmt(result.raw) + '</td></tr>' +
-    '<tr><td>Нал+Пош</td><td class="num">' + fmt(result.taxDuty) + '</td></tr>' +
-    '<tr><td>Доставка</td><td class="num">' + fmt(result.delivery) + '</td></tr>' +
-    '<tr><td>Цена флакона в руб.</td><td class="num">' + fmt(result.rawFl) + '</td></tr>' +
-    '<tr><td>Доставка флакона в руб.</td><td class="num">' + fmt(result.deliveryFl) + '</td></tr>' +
-    '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(result.taxDutyFl) + '</td></tr>' +
-    '<tr><td>Этикетка</td><td class="num">' + fmt(result.label) + '</td></tr>' +
-    '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(result.totalFl) + '</td></tr>' +
-    '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(result.total) + ' ₽</td></tr>' +
-    (result.cost1C > 0
-      ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(result.cost1C) + '</td></tr>' +
-        '<tr class="diff-row"><td>Разница</td><td class="num ' + diffClass + '">' +
-        (result.diff > 0 ? '+' : '') + fmt(result.diff) + ' (' + (result.diffPct * 100).toFixed(1) + '%)</td></tr>'
-      : '') +
-    '</table>';
-  if (payload.params) {
-    html += '<p style="margin:16px 0 12px"><b>Расшифровка расчёта</b> | USD=' + payload.params.usd +
-      ' | RMB=' + payload.params.rmb + ' | Лог=' + payload.params.log + ' | Ком=' + payload.params.com +
-      ' | Лог_fl=' + payload.params.logFl + ' | Ком_fl=' + payload.params.comFl +
-      ' | НДС=' + (payload.params.ndsRate * 100).toFixed(1) + '% | Пошлина=' + (payload.params.taxRate * 100).toFixed(1) + '%</p>';
-  }
-  for (var i = 0; i < (payload.steps || []).length; i++) {
-    var step = payload.steps[i];
-    var cls = 'verify-step';
-    if (step.title === 'ИТОГО') cls += ' step-total';
-    if (step.title.indexOf('Сравнение') >= 0) cls += ' step-diff';
-    html += '<div class="' + cls + '">';
-    html += '<div class="step-title">' + (i + 1) + '. ' + esc(step.title) + '</div>';
-    if (step.formula) html += '<div class="step-formula">' + esc(step.formula) + '</div>';
-    html += '<div class="step-result">= ' + esc(step.result) + (step.title === 'ИТОГО' ? ' ₽' : '') + '</div>';
-    html += '</div>';
-  }
-  el.innerHTML = html;
+  var visualEl = document.getElementById('calc-visual');
+  if (el) el.innerHTML = buildCalcResultHtml_(payload);
+  if (visualEl) visualEl.innerHTML = buildCalcVisualHtml_(result);
 }
 
 // ============================================================
@@ -3366,6 +3554,7 @@ function openPlanImportModal() {
 
   document.getElementById('plan-source-url').value = STATE.planImportCtx.spreadsheetUrl;
   document.getElementById('plan-header-row').value = STATE.planImportCtx.headerRow;
+  document.getElementById('plan-header-row').disabled = false;
   document.getElementById('plan-sheet-select').innerHTML = '';
   document.getElementById('plan-mapping-grid').innerHTML = '';
   document.getElementById('plan-month-grid').innerHTML = '';
@@ -3393,7 +3582,7 @@ function buildPlanImportMonths_(savedMonths) {
     var col = parseInt(src.column, 10);
     months.push({
       key: src.key || ('month' + (i + 1)),
-      label: src.label || ('Месяц ' + (i + 1)),
+      label: src.label || '',
       column: isNaN(col) ? -1 : col,
       header: src.header || ''
     });
@@ -3405,7 +3594,7 @@ function loadPlanImportSourceUI(silent) {
   if (!STATE.planImportCtx) openPlanImportModal();
   var url = String(document.getElementById('plan-source-url').value || '').trim();
   if (!url) {
-    showAlert('Внимание', 'Укажите ссылку на Google Sheets.');
+    showAlert('Внимание', 'Укажите ссылку или ID Google Sheets.');
     return;
   }
 
@@ -3414,7 +3603,11 @@ function loadPlanImportSourceUI(silent) {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('plan-cost-status', (res && res.message) || 'Не удалось загрузить источник плана.', 'error');
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((res && res.message) || 'Не удалось загрузить источник плана.', res && res.diagnostic, res && res.errorName),
+          'error'
+        );
         return;
       }
 
@@ -3422,7 +3615,15 @@ function loadPlanImportSourceUI(silent) {
       STATE.planImportCtx.spreadsheetName = res.spreadsheetName || '';
       STATE.planImportCtx.sheets = res.sheets || [];
       if (!STATE.planImportCtx.sheetName && STATE.planImportCtx.sheets.length) {
-        STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        for (var si = 0; si < STATE.planImportCtx.sheets.length; si++) {
+          if (STATE.planImportCtx.sheets[si].selectable !== false) {
+            STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[si].name;
+            break;
+          }
+        }
+        if (!STATE.planImportCtx.sheetName) {
+          STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        }
       }
       var hasCurrent = false;
       for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
@@ -3432,7 +3633,16 @@ function loadPlanImportSourceUI(silent) {
         }
       }
       if (!hasCurrent && STATE.planImportCtx.sheets.length) {
-        STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        for (var sj = 0; sj < STATE.planImportCtx.sheets.length; sj++) {
+          if (STATE.planImportCtx.sheets[sj].selectable !== false) {
+            STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[sj].name;
+            hasCurrent = true;
+            break;
+          }
+        }
+        if (!hasCurrent) {
+          STATE.planImportCtx.sheetName = STATE.planImportCtx.sheets[0].name;
+        }
       }
 
       renderPlanImportSheetOptions_();
@@ -3443,7 +3653,7 @@ function loadPlanImportSourceUI(silent) {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка загрузки источника плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка загрузки источника плана', err), 'error');
     })
     .getPlanImportSource(url);
 }
@@ -3457,7 +3667,8 @@ function renderPlanImportSheetOptions_() {
   for (var i = 0; i < sheets.length; i++) {
     var opt = document.createElement('option');
     opt.value = sheets[i].name;
-    opt.textContent = sheets[i].name + ' (' + (sheets[i].rowCount || 0) + '×' + (sheets[i].colCount || 0) + ')';
+    opt.textContent = sheets[i].name + ' (' + (sheets[i].rowCount || 0) + '×' + (sheets[i].colCount || 0) + ')' + (sheets[i].selectable === false ? ' [не поддерживается]' : '');
+    opt.disabled = sheets[i].selectable === false;
     if (sheets[i].name === STATE.planImportCtx.sheetName) opt.selected = true;
     select.appendChild(opt);
   }
@@ -3467,7 +3678,8 @@ function refreshPlanImportPreview() {
   if (!STATE.planImportCtx || !STATE.planImportCtx.sheets || !STATE.planImportCtx.sheets.length) return;
 
   STATE.planImportCtx.sheetName = document.getElementById('plan-sheet-select').value || STATE.planImportCtx.sheetName;
-  STATE.planImportCtx.headerRow = Math.max(parseInt(document.getElementById('plan-header-row').value, 10) || 1, 1);
+  var headerRowInput = document.getElementById('plan-header-row');
+  STATE.planImportCtx.headerRow = Math.max(parseInt(headerRowInput.value, 10) || 1, 1);
 
   var selectedSheet = null;
   for (var i = 0; i < STATE.planImportCtx.sheets.length; i++) {
@@ -3477,6 +3689,27 @@ function refreshPlanImportPreview() {
     }
   }
   if (!selectedSheet) return;
+
+  if (selectedSheet.headerRowLocked) {
+    STATE.planImportCtx.headerRow = 1;
+    if (headerRowInput) {
+      headerRowInput.value = '1';
+      headerRowInput.disabled = true;
+    }
+  } else if (headerRowInput) {
+    headerRowInput.disabled = false;
+  }
+
+  if (selectedSheet.selectable === false) {
+    STATE.planImportCtx.headers = [];
+    STATE.planImportCtx.mapping = { name: -1, articleWb: -1 };
+    document.getElementById('plan-mapping-grid').innerHTML = '<div class="mapping-hint">' + esc(selectedSheet.previewError || 'Выбранный лист не поддерживается для импорта плана.') + '</div>';
+    document.getElementById('plan-month-grid').innerHTML = '<div class="mapping-hint">Выберите другой лист источника.</div>';
+    renderPlanPreviewTable_([]);
+    document.getElementById('plan-import-source-info').textContent =
+      (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · ' + (selectedSheet.previewError || 'Лист не поддерживается');
+    return;
+  }
 
   var previewRows = selectedSheet.previewRows || [];
   var headerIdx = STATE.planImportCtx.headerRow - 1;
@@ -3493,7 +3726,10 @@ function refreshPlanImportPreview() {
   renderPlanPreviewTable_(previewRows);
 
   document.getElementById('plan-import-source-info').textContent =
-    (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · Строка заголовков: ' + STATE.planImportCtx.headerRow;
+    (STATE.planImportCtx.spreadsheetName || 'Google Sheets') + ' · Лист: ' + STATE.planImportCtx.sheetName + ' · ' +
+    (selectedSheet.type === 'DATASOURCE'
+      ? 'Тип: DATASOURCE · Заголовки фиксированы'
+      : 'Строка заголовков: ' + STATE.planImportCtx.headerRow);
 }
 
 function buildPlanImportMapping_() {
@@ -3605,7 +3841,7 @@ function renderPlanMonthControls_() {
     }
 
     html += '<div class="mapping-row">';
-    html += '<div><div class="mapping-label required">Месяц ' + (i + 1) + '</div><div class="mapping-hint">Название периода и колонка количества</div></div>';
+    html += '<div><div class="mapping-label">Месяц ' + (i + 1) + '</div><div class="mapping-hint">Необязательно. Можно заполнить от 1 до 3 месяцев.</div></div>';
     html += '<div>';
     html += '<input id="plan-month-label-' + i + '" type="text" value="' + esc(month.label) + '" placeholder="Например, Июль 2026" oninput="onPlanMonthLabelChanged_(' + i + ', this.value)">';
     html += '<select id="plan-month-col-' + i + '" class="mapping-select" onchange="onPlanMonthColumnChanged_(' + i + ', this.value)" style="margin-top:8px">';
@@ -3750,16 +3986,37 @@ function confirmPlanImport() {
     return;
   }
 
+  var selectedSheet = null;
+  for (var si = 0; si < STATE.planImportCtx.sheets.length; si++) {
+    if (STATE.planImportCtx.sheets[si].name === STATE.planImportCtx.sheetName) {
+      selectedSheet = STATE.planImportCtx.sheets[si];
+      break;
+    }
+  }
+  if (selectedSheet && selectedSheet.selectable === false) {
+    showAlert('Внимание', selectedSheet.previewError || 'Выбранный лист не поддерживается для импорта плана.');
+    return;
+  }
+
   var payload = buildPlanImportPayload_();
   if (payload.mapping.name < 0 && payload.mapping.articleWb < 0) {
     showAlert('Внимание', 'Укажите хотя бы одну колонку сопоставления: Наименование или Артикул ВБ.');
     return;
   }
+  var activeMonths = 0;
   for (var i = 0; i < payload.months.length; i++) {
-    if (!payload.months[i].label || payload.months[i].column < 0) {
-      showAlert('Внимание', 'Для каждого из трёх месяцев укажите название и колонку количества.');
+    var hasLabel = !!String(payload.months[i].label || '').trim();
+    var hasColumn = payload.months[i].column >= 0;
+    if (!hasLabel && !hasColumn) continue;
+    if (!hasLabel || !hasColumn) {
+      showAlert('Внимание', 'У каждого заполненного месяца должны быть указаны и название, и колонка количества.');
       return;
     }
+    activeMonths++;
+  }
+  if (!activeMonths) {
+    showAlert('Внимание', 'Укажите хотя бы один месяц плана.');
+    return;
   }
 
   closePlanImportModal();
@@ -3769,19 +4026,25 @@ function confirmPlanImport() {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('plan-cost-status', (res && res.message) || 'Импорт плана завершился с ошибкой.', 'error');
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((res && res.message) || 'Импорт плана завершился с ошибкой.', res && res.diagnostic, res && res.errorName),
+          'error'
+        );
         return;
       }
 
-      if (res.state) applyPlanCostState_(res.state);
       var summary = res.importSummary || {};
       var message = 'План импортирован: ' + (summary.matchedItems || 0) + ' сопоставлено, ' + (summary.unmatchedItems || 0) + ' не сопоставлено, дублей объединено: ' + Math.max((summary.processedRows || 0) - (summary.dedupedRows || 0), 0) + '.';
       setStatus('plan-cost-status', message, 'success');
-      runPlanCalculation();
+      if (res.stateLoadError) {
+        showToast('План импортирован. Состояние вкладки обновляю отдельно: ' + res.stateLoadError, 'warning');
+      }
+      loadPlanCostStateUI(true);
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка импорта плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка импорта плана', err), 'error');
     })
     .importPlanCosts(payload);
 }
@@ -3791,6 +4054,16 @@ function loadPlanCostStateUI(shouldCalculate) {
   google.script.run
     .withSuccessHandler(function(state) {
       hideLoading();
+      if (!state || !state.success) {
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((state && state.message) || 'Не удалось загрузить состояние плана.', state && state.diagnostic, state && state.errorName),
+          'error'
+        );
+        renderPlanCostStats(null);
+        renderPlanCostTable([]);
+        return;
+      }
       applyPlanCostState_(state || {});
 
       if (!STATE.planCost.items || !STATE.planCost.items.length) {
@@ -3813,7 +4086,7 @@ function loadPlanCostStateUI(shouldCalculate) {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка загрузки плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка загрузки плана', err), 'error');
     })
     .getPlanCostState();
 }
@@ -3861,8 +4134,19 @@ function renderPlanMonthSelect_() {
 }
 
 function runPlanCalculation() {
+  if (!STATE.planCost || !STATE.planCost.loaded || !STATE.planCost.items || !STATE.planCost.items.length) {
+    loadPlanCostStateUI(true);
+    return;
+  }
+
   var monthSelect = document.getElementById('plan-month-select');
   var monthKey = monthSelect ? monthSelect.value : '';
+  if (!monthKey) {
+    if (STATE.planCost.months && STATE.planCost.months.length) {
+      renderPlanMonthSelect_();
+      monthKey = monthSelect ? monthSelect.value : '';
+    }
+  }
   if (!monthKey) {
     setStatus('plan-cost-status', 'Выберите месяц для расчёта.', 'info');
     return;
@@ -3875,7 +4159,11 @@ function runPlanCalculation() {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('plan-cost-status', (res && res.message) || 'Не удалось рассчитать план.', 'error');
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((res && res.message) || 'Не удалось рассчитать план.', res && res.diagnostic, res && res.errorName),
+          'error'
+        );
         return;
       }
 
@@ -3890,7 +4178,7 @@ function runPlanCalculation() {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка расчёта плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка расчёта плана', err), 'error');
     })
     .calculatePlanCosts(monthKey);
 }
@@ -3940,6 +4228,7 @@ function buildPlanTabulatorColumns_() {
       def.frozen = true;
       def.headerFilter = 'input';
       def.headerFilterPlaceholder = 'Поиск...';
+      def.bottomCalc = function() { return 'Итого'; };
     } else if (col.key === 'type') {
       def.formatter = fmtTypeBadge;
       def.headerFilter = 'list';
@@ -3959,6 +4248,9 @@ function buildPlanTabulatorColumns_() {
       def.hozAlign = 'right';
       def.formatter = fmtNumber;
       def.formatterParams = { decimals: 2 };
+      def.bottomCalc = 'sum';
+      def.bottomCalcFormatter = fmtNumber;
+      def.bottomCalcFormatterParams = { decimals: 2 };
     }
 
     if (col.total) {
@@ -3995,6 +4287,8 @@ function renderPlanCostTable(results) {
     layout: 'fitDataFill',
     placeholder: 'Импортируйте план и выберите месяц для расчёта',
     dataTree: true,
+    columnCalcs: 'table',
+    dataTreeChildColumnCalcs: false,
     dataTreeStartExpanded: false,
     dataTreeChildField: '_children',
     dataTreeChildIndent: 18,

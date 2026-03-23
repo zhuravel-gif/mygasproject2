@@ -103,7 +103,7 @@
     <div class="modal-header">
       <div>
         <h3>Импорт плана продаж</h3>
-        <p id="plan-import-modal-subtitle" class="hint">Укажите ссылку на Google Sheets, выберите лист, строки заголовков и три месяца плана.</p>
+        <p id="plan-import-modal-subtitle" class="hint">Укажите ссылку или ID Google Sheets, выберите лист, строку заголовков и от 1 до 3 месяцев плана.</p>
       </div>
       <button class="btn btn-icon" onclick="closePlanImportModal()"><i data-lucide="x"></i></button>
     </div>
@@ -112,8 +112,8 @@
       <div class="wizard-grid">
         <div class="wizard-panel">
           <div class="param-group">
-            <label>Ссылка на Google Sheets</label>
-            <input id="plan-source-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/...">
+            <label>Ссылка или ID Google Sheets</label>
+            <input id="plan-source-url" type="text" placeholder="https://docs.google.com/spreadsheets/d/... или spreadsheetId">
           </div>
 
           <div class="actions">
@@ -138,7 +138,7 @@
           </div>
 
           <div>
-            <h4 class="section-title">Три месяца плана</h4>
+            <h4 class="section-title">Месяцы плана</h4>
             <div id="plan-month-grid" class="mapping-grid"></div>
           </div>
         </div>
@@ -423,112 +423,142 @@
       <p class="hint">Можно выбрать существующую позицию или задать значения вручную.</p>
 
       <div class="calc-layout">
-        <div class="calc-inputs">
-          <div class="calc-section">
-            <div class="section-title">Позиция</div>
-            <div class="param-group">
-              <label>Позиция из данных</label>
-              <select id="calc-select" onchange="onCalcSelect()">
-                <option value="">— Ручной ввод —</option>
-              </select>
+        <div class="calc-control-board">
+          <div class="calc-group calc-group-item">
+            <div class="calc-group-head">
+              <span class="calc-group-kicker">Позиция</span>
+              <h3>Источник и тип</h3>
             </div>
-            <div class="param-group">
-              <label>Тип товара</label>
-              <select id="calc-type" onchange="calcManual()">
-                <option value="Сырьё">Сырьё</option>
-                <option value="Готовый товар">Готовый товар</option>
-                <option value="Флакон">Флакон</option>
-                <option value="Наборы">Наборы</option>
-              </select>
-            </div>
-            <div class="param-group">
-              <label>Цена поставщика</label>
-              <input id="calc-price" type="number" step="0.01" value="0" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Объём тары (гр)</label>
-              <input id="calc-vol" type="number" step="1" value="0" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Вес (кг)</label>
-              <input id="calc-weight" type="number" step="0.01" value="0" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>НДС</label>
-              <input id="calc-nds" type="number" step="0.001" value="0.22" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Пошлина</label>
-              <input id="calc-tax" type="number" step="0.001" value="0.065" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Себестоимость 1С</label>
-              <input id="calc-cost1c" type="number" step="0.01" value="0" oninput="calcManual()">
+            <div class="calc-grid calc-grid-item">
+              <div class="param-group calc-field calc-field-wide">
+                <label>Позиция из данных</label>
+                <select id="calc-select" onchange="onCalcSelect()">
+                  <option value="">— Ручной ввод —</option>
+                </select>
+              </div>
+              <div class="param-group calc-field">
+                <label>Тип товара</label>
+                <select id="calc-type" onchange="calcManual()">
+                  <option value="Сырьё">Сырьё</option>
+                  <option value="Готовый товар">Готовый товар</option>
+                  <option value="Флакон">Флакон</option>
+                  <option value="Наборы">Наборы</option>
+                </select>
+              </div>
+              <div class="param-group calc-field">
+                <label>Себестоимость 1С</label>
+                <input id="calc-cost1c" type="number" step="0.01" value="0" oninput="calcManual()">
+              </div>
             </div>
           </div>
 
-          <div class="calc-section">
-            <div class="section-title">Флакон</div>
-            <div class="param-group">
-              <label>Флакон</label>
-              <select id="calc-flakon" onchange="onCalcFlakonChange()">
-                <option value="">— Нет —</option>
-              </select>
+          <div class="calc-group calc-group-raw">
+            <div class="calc-group-head">
+              <span class="calc-group-kicker">Сырьё</span>
+              <h3>Основные входные данные</h3>
             </div>
-            <div class="param-group">
-              <label>Цена поставщика флакона</label>
-              <input id="calc-fl-price" type="number" step="0.01" value="0" oninput="calcManual()">
+            <div class="calc-grid calc-grid-raw">
+              <div class="param-group calc-field">
+                <label>Цена поставщика</label>
+                <input id="calc-price" type="number" step="0.01" value="0" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Объём тары (гр)</label>
+                <input id="calc-vol" type="number" step="1" value="0" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Вес (кг)</label>
+                <input id="calc-weight" type="number" step="0.01" value="0" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>НДС</label>
+                <input id="calc-nds" type="number" step="0.001" value="0.22" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Пошлина</label>
+                <input id="calc-tax" type="number" step="0.001" value="0.065" oninput="calcManual()">
+              </div>
             </div>
-            <div class="param-group">
-              <label>Вес флакона (кг)</label>
-              <input id="calc-fl-weight" type="number" step="0.001" value="0" oninput="calcManual()">
+          </div>
+
+          <div class="calc-group calc-group-flakon">
+            <div class="calc-group-head">
+              <span class="calc-group-kicker">Флакон</span>
+              <h3>Тара и упаковка</h3>
             </div>
-            <div class="param-group">
-              <label>НДС флакона</label>
-              <input id="calc-fl-nds" type="number" step="0.001" value="0.22" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Пошлина флакона</label>
-              <input id="calc-fl-tax" type="number" step="0.001" value="0.065" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Этикетка</label>
-              <input id="calc-fl-label" type="number" step="0.01" value="0" oninput="calcManual()">
+            <div class="calc-grid calc-grid-flakon">
+              <div class="param-group calc-field calc-field-wide">
+                <label>Флакон</label>
+                <select id="calc-flakon" onchange="onCalcFlakonChange()">
+                  <option value="">— Нет —</option>
+                </select>
+              </div>
+              <div class="param-group calc-field">
+                <label>Цена поставщика флакона</label>
+                <input id="calc-fl-price" type="number" step="0.01" value="0" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Вес флакона (кг)</label>
+                <input id="calc-fl-weight" type="number" step="0.001" value="0" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>НДС флакона</label>
+                <input id="calc-fl-nds" type="number" step="0.001" value="0.22" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Пошлина флакона</label>
+                <input id="calc-fl-tax" type="number" step="0.001" value="0.065" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Этикетка</label>
+                <input id="calc-fl-label" type="number" step="0.01" value="0" oninput="calcManual()">
+              </div>
             </div>
             <p class="hint">Если флакон не выбран, можно заполнить поля вручную. Расчёт всё равно выполнится.</p>
           </div>
 
-          <div class="calc-section">
-            <div class="section-title">Параметры расчёта</div>
-            <div class="param-group">
-              <label>Курс USD</label>
-              <input id="calc-usd" type="number" step="0.1" value="92" oninput="calcManual()">
+          <div class="calc-group calc-group-rates">
+            <div class="calc-group-head">
+              <span class="calc-group-kicker">Настройки</span>
+              <h3>Курсы, логистика и коэффициенты</h3>
             </div>
-            <div class="param-group">
-              <label>Курс RMB</label>
-              <input id="calc-rmb" type="number" step="0.1" value="12.8" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Логистика</label>
-              <input id="calc-log" type="number" step="0.1" value="4.5" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Комиссия</label>
-              <input id="calc-com" type="number" step="0.01" value="1.05" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Логистика флаконы</label>
-              <input id="calc-log-fl" type="number" step="0.1" value="4.5" oninput="calcManual()">
-            </div>
-            <div class="param-group">
-              <label>Комиссия флаконы</label>
-              <input id="calc-com-fl" type="number" step="0.01" value="1.05" oninput="calcManual()">
+            <div class="calc-grid calc-grid-rates">
+              <div class="param-group calc-field">
+                <label>Курс USD</label>
+                <input id="calc-usd" type="number" step="0.1" value="92" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Курс RMB</label>
+                <input id="calc-rmb" type="number" step="0.1" value="12.8" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Логистика</label>
+                <input id="calc-log" type="number" step="0.1" value="4.5" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Комиссия</label>
+                <input id="calc-com" type="number" step="0.01" value="1.05" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Логистика флаконы</label>
+                <input id="calc-log-fl" type="number" step="0.1" value="4.5" oninput="calcManual()">
+              </div>
+              <div class="param-group calc-field">
+                <label>Комиссия флаконы</label>
+                <input id="calc-com-fl" type="number" step="0.01" value="1.05" oninput="calcManual()">
+              </div>
             </div>
           </div>
         </div>
 
-        <div id="calc-result" class="calc-result">
-          <p class="hint">Заполните поля для расчёта.</p>
+        <div class="calc-output-stack">
+          <div id="calc-result" class="calc-result calc-panel">
+            <p class="hint">Заполните поля для расчёта.</p>
+          </div>
+
+          <div id="calc-visual" class="calc-visual calc-panel">
+            <p class="hint">После расчёта здесь появится структура затрат по долям и вложенным статьям.</p>
+          </div>
         </div>
       </div>
     </div>
