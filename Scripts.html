@@ -3394,7 +3394,7 @@ function buildPlanImportMonths_(savedMonths) {
     var col = parseInt(src.column, 10);
     months.push({
       key: src.key || ('month' + (i + 1)),
-      label: src.label || ('Месяц ' + (i + 1)),
+      label: src.label || '',
       column: isNaN(col) ? -1 : col,
       header: src.header || ''
     });
@@ -3649,7 +3649,7 @@ function renderPlanMonthControls_() {
     }
 
     html += '<div class="mapping-row">';
-    html += '<div><div class="mapping-label required">Месяц ' + (i + 1) + '</div><div class="mapping-hint">Название периода и колонка количества</div></div>';
+    html += '<div><div class="mapping-label">Месяц ' + (i + 1) + '</div><div class="mapping-hint">Необязательно. Можно заполнить от 1 до 3 месяцев.</div></div>';
     html += '<div>';
     html += '<input id="plan-month-label-' + i + '" type="text" value="' + esc(month.label) + '" placeholder="Например, Июль 2026" oninput="onPlanMonthLabelChanged_(' + i + ', this.value)">';
     html += '<select id="plan-month-col-' + i + '" class="mapping-select" onchange="onPlanMonthColumnChanged_(' + i + ', this.value)" style="margin-top:8px">';
@@ -3811,11 +3811,20 @@ function confirmPlanImport() {
     showAlert('Внимание', 'Укажите хотя бы одну колонку сопоставления: Наименование или Артикул ВБ.');
     return;
   }
+  var activeMonths = 0;
   for (var i = 0; i < payload.months.length; i++) {
-    if (!payload.months[i].label || payload.months[i].column < 0) {
-      showAlert('Внимание', 'Для каждого из трёх месяцев укажите название и колонку количества.');
+    var hasLabel = !!String(payload.months[i].label || '').trim();
+    var hasColumn = payload.months[i].column >= 0;
+    if (!hasLabel && !hasColumn) continue;
+    if (!hasLabel || !hasColumn) {
+      showAlert('Внимание', 'У каждого заполненного месяца должны быть указаны и название, и колонка количества.');
       return;
     }
+    activeMonths++;
+  }
+  if (!activeMonths) {
+    showAlert('Внимание', 'Укажите хотя бы один месяц плана.');
+    return;
   }
 
   closePlanImportModal();
@@ -3829,11 +3838,20 @@ function confirmPlanImport() {
         return;
       }
 
-      if (res.state) applyPlanCostState_(res.state);
       var summary = res.importSummary || {};
       var message = 'План импортирован: ' + (summary.matchedItems || 0) + ' сопоставлено, ' + (summary.unmatchedItems || 0) + ' не сопоставлено, дублей объединено: ' + Math.max((summary.processedRows || 0) - (summary.dedupedRows || 0), 0) + '.';
       setStatus('plan-cost-status', message, 'success');
-      runPlanCalculation();
+
+      if (res.state) {
+        applyPlanCostState_(res.state);
+        runPlanCalculation();
+        return;
+      }
+
+      if (res.stateLoadError) {
+        showToast('План импортирован. Состояние вкладки обновляю отдельно: ' + res.stateLoadError, 'warning');
+      }
+      loadPlanCostStateUI(true);
     })
     .withFailureHandler(function(err) {
       hideLoading();
