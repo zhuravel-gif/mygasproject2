@@ -52,6 +52,33 @@ function setStatus(id, msg, type) {
   }
 }
 
+function normalizePlanErrorText_(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function buildPlanStatusError_(message, diagnostic, errorName) {
+  var parts = [];
+  var cleanMessage = normalizePlanErrorText_(message) || 'Ошибка операции плана.';
+  parts.push(cleanMessage);
+  var cleanName = normalizePlanErrorText_(errorName);
+  var cleanDiagnostic = normalizePlanErrorText_(diagnostic);
+  if (cleanName) parts.push('Тип: ' + cleanName);
+  if (cleanDiagnostic) parts.push('Диагностика: ' + cleanDiagnostic);
+  return parts.join(' | ');
+}
+
+function buildPlanThrownErrorText_(prefix, err) {
+  var message = (err && err.message) ? err.message : prefix;
+  var diagnostic = '';
+  if (err) {
+    if (err.stack) diagnostic = err.stack;
+    else if (err.details) diagnostic = err.details;
+    else if (typeof err === 'string') diagnostic = err;
+  }
+  return buildPlanStatusError_(prefix ? (prefix + ': ' + message) : message, diagnostic, err && err.name);
+}
+
 function toggleImportGuide() {
   var guide = document.getElementById('import-guide');
   if (!guide) return;
@@ -3576,7 +3603,11 @@ function loadPlanImportSourceUI(silent) {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('plan-cost-status', (res && res.message) || 'Не удалось загрузить источник плана.', 'error');
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((res && res.message) || 'Не удалось загрузить источник плана.', res && res.diagnostic, res && res.errorName),
+          'error'
+        );
         return;
       }
 
@@ -3622,7 +3653,7 @@ function loadPlanImportSourceUI(silent) {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка загрузки источника плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка загрузки источника плана', err), 'error');
     })
     .getPlanImportSource(url);
 }
@@ -3995,7 +4026,11 @@ function confirmPlanImport() {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('plan-cost-status', (res && res.message) || 'Импорт плана завершился с ошибкой.', 'error');
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((res && res.message) || 'Импорт плана завершился с ошибкой.', res && res.diagnostic, res && res.errorName),
+          'error'
+        );
         return;
       }
 
@@ -4009,7 +4044,7 @@ function confirmPlanImport() {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка импорта плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка импорта плана', err), 'error');
     })
     .importPlanCosts(payload);
 }
@@ -4019,6 +4054,16 @@ function loadPlanCostStateUI(shouldCalculate) {
   google.script.run
     .withSuccessHandler(function(state) {
       hideLoading();
+      if (!state || !state.success) {
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((state && state.message) || 'Не удалось загрузить состояние плана.', state && state.diagnostic, state && state.errorName),
+          'error'
+        );
+        renderPlanCostStats(null);
+        renderPlanCostTable([]);
+        return;
+      }
       applyPlanCostState_(state || {});
 
       if (!STATE.planCost.items || !STATE.planCost.items.length) {
@@ -4041,7 +4086,7 @@ function loadPlanCostStateUI(shouldCalculate) {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка загрузки плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка загрузки плана', err), 'error');
     })
     .getPlanCostState();
 }
@@ -4114,7 +4159,11 @@ function runPlanCalculation() {
     .withSuccessHandler(function(res) {
       hideLoading();
       if (!res || !res.success) {
-        setStatus('plan-cost-status', (res && res.message) || 'Не удалось рассчитать план.', 'error');
+        setStatus(
+          'plan-cost-status',
+          buildPlanStatusError_((res && res.message) || 'Не удалось рассчитать план.', res && res.diagnostic, res && res.errorName),
+          'error'
+        );
         return;
       }
 
@@ -4129,7 +4178,7 @@ function runPlanCalculation() {
     })
     .withFailureHandler(function(err) {
       hideLoading();
-      setStatus('plan-cost-status', 'Ошибка расчёта плана: ' + err.message, 'error');
+      setStatus('plan-cost-status', buildPlanThrownErrorText_('Ошибка расчёта плана', err), 'error');
     })
     .calculatePlanCosts(monthKey);
 }
