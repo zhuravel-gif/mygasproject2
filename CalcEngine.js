@@ -550,7 +550,7 @@ function applyManualFlakonOverride_(flakonMap, flakonName, manualFlakon, params)
   if (!flakonName) return;
 
   var base = getDirectFlakon_(flakonName, flakonMap) || {};
-  flakonMap[flakonName] = {
+  var merged = {
     name: flakonName,
     volume: toNumber_(base.volume, 0),
     supplierPrice: manualFlakon.supplierPrice !== '' ? toNumber_(manualFlakon.supplierPrice, 0) : toNumber_(base.supplierPrice, 0),
@@ -558,6 +558,20 @@ function applyManualFlakonOverride_(flakonMap, flakonName, manualFlakon, params)
     nds: manualFlakon.nds !== '' ? toNumber_(manualFlakon.nds, toNumber_(params.flakonNds, 0.22)) : toNumber_(base.nds, toNumber_(params.flakonNds, 0.22)),
     tax: manualFlakon.tax !== '' ? toNumber_(manualFlakon.tax, toNumber_(params.flakonTax, 0.065)) : toNumber_(base.tax, toNumber_(params.flakonTax, 0.065)),
     label: manualFlakon.label !== '' ? toNumber_(manualFlakon.label, 0) : toNumber_(base.label, 0)
+  };
+  var metrics = calculateFlakonMetrics_(merged, params || {});
+  flakonMap[flakonName] = {
+    name: flakonName,
+    volume: merged.volume,
+    supplierPrice: merged.supplierPrice,
+    weight: merged.weight,
+    nds: merged.nds,
+    tax: merged.tax,
+    label: metrics.label,
+    rawFl: metrics.rawFl,
+    deliveryFl: metrics.deliveryFl,
+    taxDutyFl: metrics.taxDutyFl,
+    totalFl: metrics.totalFl
   };
 }
 

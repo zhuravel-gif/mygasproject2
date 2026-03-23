@@ -1580,6 +1580,7 @@ function onCalcSelect() {
   document.getElementById('calc-weight').value  = parseFloat(row[12]) || 0;
   document.getElementById('calc-flakon').value  = String(row[8] || '').trim();
   document.getElementById('calc-cost1c').value  = parseFloat(row[14]) || 0; // COL.COST_1C = 14
+  setCalcFlakonInputs(getFlakonByName(document.getElementById('calc-flakon').value || '') || null);
   calcManual();
 }
 
@@ -1670,6 +1671,7 @@ function buildCalcResultHtml_(payload) {
   var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
   var total = parseFloat(result.total) || 0;
   var flakonTotal = parseFloat(result.totalFl) || 0;
+  var visualHtml = buildCalcVisualHtml_(result, { embedded: true });
   var summaryHtml =
     '<div class="calc-summary-grid">' +
       '<div class="calc-summary-card">' +
@@ -1747,6 +1749,7 @@ function buildCalcResultHtml_(payload) {
       '<div class="calc-detail-card">' +
         '<h4>Итоговая детализация</h4>' +
         tableHtml +
+        '<div class="calc-embedded-visual">' + visualHtml + '</div>' +
       '</div>' +
       '<div class="calc-detail-card">' +
         '<h4>Шаги расчёта</h4>' +
@@ -1755,21 +1758,36 @@ function buildCalcResultHtml_(payload) {
     '</div>';
 }
 
-function buildCalcVisualHtml_(result) {
+function buildCalcVisualHtml_(result, options) {
+  options = options || {};
   var total = parseFloat(result && result.total) || 0;
   var groups = buildCalcShareGroups_(result).filter(function(group) { return group.total > 0; });
   if (!groups.length || total <= 0) {
     return '<p class="hint">После расчёта здесь появится структура затрат по долям и вложенным статьям.</p>';
   }
 
-  var html =
-    '<div class="calc-visual-head">' +
-      '<div>' +
-        '<h3>Структура затрат</h3>' +
-        '<p class="calc-visual-subtitle">Верхний уровень показывает долю крупных контуров, внутри каждого блока раскрыты младшие статьи.</p>' +
-      '</div>' +
-      '<div class="calc-summary-note">База для долей: ' + fmt(total) + ' ₽</div>' +
-    '</div>' +
+  var html = '';
+  if (options.embedded) {
+    html +=
+      '<div class="calc-embedded-visual-head">' +
+        '<div>' +
+          '<h5>Структура затрат</h5>' +
+          '<p class="calc-visual-subtitle">Верхний уровень показывает долю крупных контуров, внутри каждого блока раскрыты младшие статьи.</p>' +
+        '</div>' +
+        '<div class="calc-summary-note">База для долей: ' + fmt(total) + ' ₽</div>' +
+      '</div>';
+  } else {
+    html +=
+      '<div class="calc-visual-head">' +
+        '<div>' +
+          '<h3>Структура затрат</h3>' +
+          '<p class="calc-visual-subtitle">Верхний уровень показывает долю крупных контуров, внутри каждого блока раскрыты младшие статьи.</p>' +
+        '</div>' +
+        '<div class="calc-summary-note">База для долей: ' + fmt(total) + ' ₽</div>' +
+      '</div>';
+  }
+
+  html +=
     '<div class="calc-share-list">';
 
   for (var i = 0; i < groups.length; i++) {
@@ -1817,11 +1835,8 @@ function buildCalcVisualHtml_(result) {
 
 function renderCalcResult(r) {
   var payload = r && r.result ? r : { result: r, steps: [], params: null, type: r ? r.type : '' };
-  var result = payload.result || {};
   var el = document.getElementById('calc-result');
-  var visualEl = document.getElementById('calc-visual');
   if (el) el.innerHTML = buildCalcResultHtml_(payload);
-  if (visualEl) visualEl.innerHTML = buildCalcVisualHtml_(result);
 }
 
 // ============================================================
