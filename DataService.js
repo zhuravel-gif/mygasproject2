@@ -1073,11 +1073,30 @@ function importMappedValues_(payload, targetCol, label, mappingType) {
   var data = sheet.getDataRange().getValues();
   var nameMap = {};
   var articleMap = {};
+  var rawNameMap = {};
+  var rawColIndex = (typeof COL !== 'undefined' && typeof COL.RAW === 'number') ? COL.RAW : 7;
+  var flakonMap = null;
+  if (mappingType === 'supplier' && typeof buildFlakonMap === 'function' && typeof getFlakonList === 'function') {
+    flakonMap = buildFlakonMap(getFlakonList());
+  }
   for (var rowIndex = 1; rowIndex < data.length; rowIndex++) {
     var nameKey = normalizeMatchKey_(data[rowIndex][0]);
     var articleKey = normalizeMatchKey_(data[rowIndex][1]);
+    var rowType = '';
+    if (mappingType === 'supplier') {
+      if (typeof determineType === 'function') {
+        rowType = determineType(data[rowIndex], flakonMap || {});
+      } else {
+        rowType = String(data[rowIndex][rawColIndex] || '').trim() ? 'Сырьё' : '';
+      }
+    }
+    var rawKey = rowType === 'Сырьё' ? normalizeMatchKey_(data[rowIndex][rawColIndex]) : '';
     if (nameKey && !nameMap.hasOwnProperty(nameKey)) nameMap[nameKey] = rowIndex;
     if (articleKey && !articleMap.hasOwnProperty(articleKey)) articleMap[articleKey] = rowIndex;
+    if (rawKey) {
+      if (!rawNameMap.hasOwnProperty(rawKey)) rawNameMap[rawKey] = [];
+      rawNameMap[rawKey].push(rowIndex);
+    }
   }
 
   var matchedByName = 0;
@@ -1088,20 +1107,25 @@ function importMappedValues_(payload, targetCol, label, mappingType) {
     var item = payload.rows[i] || {};
     var nameLookup = normalizeMatchKey_(item.name);
     var articleLookup = normalizeMatchKey_(item.article);
-    var targetRow = null;
+    var targetRows = [];
 
-    if (nameLookup && nameMap.hasOwnProperty(nameLookup)) {
-      targetRow = nameMap[nameLookup];
+    if (mappingType === 'supplier' && nameLookup && rawNameMap.hasOwnProperty(nameLookup)) {
+      targetRows = rawNameMap[nameLookup].slice();
+      matchedByName++;
+    } else if (nameLookup && nameMap.hasOwnProperty(nameLookup)) {
+      targetRows = [nameMap[nameLookup]];
       matchedByName++;
     } else if (articleLookup && articleMap.hasOwnProperty(articleLookup)) {
-      targetRow = articleMap[articleLookup];
+      targetRows = [articleMap[articleLookup]];
       matchedByArticle++;
     } else if (unmatched.length < 25) {
       unmatched.push(item.name || item.article || ('Строка ' + (i + 1)));
     }
 
-    if (targetRow !== null) {
-      data[targetRow][targetCol] = coerceNumber_(item.value);
+    if (targetRows.length) {
+      for (var targetIndex = 0; targetIndex < targetRows.length; targetIndex++) {
+        data[targetRows[targetIndex]][targetCol] = coerceNumber_(item.value);
+      }
     }
   }
 
