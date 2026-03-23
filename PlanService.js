@@ -6,7 +6,6 @@ var PLAN_COST_CFG = {
   SHEET: 'План затрат',
   META_KEY: 'plan.importConfig',
   PREVIEW_ROWS: 120,
-  PREVIEW_COLS: 30,
   MONTH_KEYS: ['month1', 'month2', 'month3'],
   HEADERS: [
     'План.Наименование',
@@ -206,7 +205,7 @@ function buildPlanSourceSheetInfo_(sheet) {
   };
 
   try {
-    var sourceData = readPlanSheetSourceRows_(sheet, PLAN_COST_CFG.PREVIEW_ROWS - 1, PLAN_COST_CFG.PREVIEW_COLS);
+    var sourceData = readPlanSheetSourceRows_(sheet, PLAN_COST_CFG.PREVIEW_ROWS - 1, null);
     info.rowCount = sourceData.rowCount;
     info.colCount = sourceData.colCount;
     info.previewRows = sourceData.rows;
