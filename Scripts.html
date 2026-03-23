@@ -606,9 +606,12 @@ function renderExportTable(data) {
     tableData.push(obj);
   }
 
-  // Priority column order: Наименование, Артикул, Артикул ВБ, Категория,
+  // Priority column order: Наименование, Артикул, Артикул ВБ, Категория, Тип товара,
   // Объём тары, Товарная группа 1, Цена поставщика, НДС, Пошлина, затем остальные
-  var EXPORT_COL_ORDER = [0, 1, 2, 3, 4, 5, EXPORT_PRICE_COL, EXPORT_NDS_COL, EXPORT_TAX_COL];
+  var typeColIndex = typeof data.typeColIndex === 'number' ? data.typeColIndex : -1;
+  var EXPORT_COL_ORDER = [0, 1, 2, 3];
+  if (typeColIndex >= 0) EXPORT_COL_ORDER.push(typeColIndex);
+  EXPORT_COL_ORDER = EXPORT_COL_ORDER.concat([4, 5, EXPORT_PRICE_COL, EXPORT_NDS_COL, EXPORT_TAX_COL]);
   var orderedIndices = [];
   var seen = {};
   for (var p = 0; p < EXPORT_COL_ORDER.length; p++) {
@@ -641,6 +644,12 @@ function renderExportTable(data) {
       colDef.minWidth = 200;
       colDef.headerFilter = 'input';
       colDef.headerFilterPlaceholder = 'Поиск...';
+    } else if (c === typeColIndex) {
+      colDef.minWidth = 130;
+      colDef.headerFilter = 'list';
+      colDef.headerFilterFunc = '=';
+      colDef.headerFilterParams = { valuesLookup: true, sortValuesList: 'asc' };
+      colDef.hozAlign = 'left';
     } else if (c === EXPORT_PRICE_COL) {
       // Editable supplier price column
       colDef.editor = 'number';

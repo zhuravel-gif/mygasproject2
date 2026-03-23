@@ -247,19 +247,49 @@ function getData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.DATA);
   if (!sheet || sheet.getLastRow() < 1) {
-    return { headers: getProjectHeaders_(), rows: [] };
+    return { headers: getProjectHeaders_(), rows: [], typeColIndex: -1 };
   }
 
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) {
-    return { headers: data[0] || getProjectHeaders_(), rows: [] };
+    return { headers: data[0] || getProjectHeaders_(), rows: [], typeColIndex: -1 };
   }
 
-  return { headers: data[0], rows: data.slice(1) };
+  var headers = data[0].slice();
+  var rows = data.slice(1);
+  var typeHeader = 'Тип товара';
+  var typeColIndex = headers.length;
+  headers.push(typeHeader);
+
+  var flakonMap = null;
+  if (typeof buildFlakonMap === 'function' && typeof getFlakonList === 'function') {
+    flakonMap = buildFlakonMap(getFlakonList());
+  }
+
+  var enrichedRows = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i].slice();
+    row.push(getDataRowType_(row, flakonMap || {}));
+    enrichedRows.push(row);
+  }
+
+  return { headers: headers, rows: enrichedRows, typeColIndex: typeColIndex };
 }
 
 function getDataHeaders() {
   return getProjectHeaders_();
+}
+
+function getDataRowType_(row, flakonMap) {
+  if (!row || !row.length) return '';
+  if (typeof determineType === 'function') return determineType(row, flakonMap || {});
+
+  var rawColIndex = (typeof COL !== 'undefined' && typeof COL.RAW === 'number') ? COL.RAW : 7;
+  var setColIndex = (typeof COL !== 'undefined' && typeof COL.IS_SET === 'number') ? COL.IS_SET : 11;
+  var isSet = String(row[setColIndex] || '').trim();
+  var hasRaw = String(row[rawColIndex] || '').trim() !== '';
+  if (isSet === 'Да') return 'Наборы';
+  return hasRaw ? 'Сырьё' : 'Готовый товар';
 }
 
 function getParams() {
