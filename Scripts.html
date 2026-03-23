@@ -4014,6 +4014,7 @@ function buildPlanTabulatorColumns_() {
       def.frozen = true;
       def.headerFilter = 'input';
       def.headerFilterPlaceholder = 'Поиск...';
+      def.bottomCalc = function() { return 'Итого'; };
     } else if (col.key === 'type') {
       def.formatter = fmtTypeBadge;
       def.headerFilter = 'list';
@@ -4033,6 +4034,9 @@ function buildPlanTabulatorColumns_() {
       def.hozAlign = 'right';
       def.formatter = fmtNumber;
       def.formatterParams = { decimals: 2 };
+      def.bottomCalc = 'sum';
+      def.bottomCalcFormatter = fmtNumber;
+      def.bottomCalcFormatterParams = { decimals: 2 };
     }
 
     if (col.total) {
@@ -4069,6 +4073,8 @@ function renderPlanCostTable(results) {
     layout: 'fitDataFill',
     placeholder: 'Импортируйте план и выберите месяц для расчёта',
     dataTree: true,
+    columnCalcs: 'table',
+    dataTreeChildColumnCalcs: false,
     dataTreeStartExpanded: false,
     dataTreeChildField: '_children',
     dataTreeChildIndent: 18,
