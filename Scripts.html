@@ -594,7 +594,9 @@ function renderExportTable(data) {
       field: 'col' + c,
       headerSort: true,
       resizable: true,
-      headerTooltip: true
+      headerTooltip: true,
+      headerFilter: 'input',
+      headerFilterPlaceholder: 'Фильтр...'
     };
 
     if (c === 0) {
@@ -1002,6 +1004,8 @@ function saveFlakonDataUI() {
 // ============================================================
 var COST_COLUMNS = [
   { key: 'name', label: 'Номенклатура', numeric: false, filterable: false },
+  { key: 'articleWb', label: 'Артикул ВБ', numeric: false, filterable: false },
+  { key: 'article', label: 'Артикул', numeric: false, filterable: false },
   { key: 'flakonName', label: 'Флакон', numeric: false, filterable: false },
   { key: 'category', label: 'Категория', numeric: false, filterable: false },
   { key: 'type', label: 'Тип', numeric: false, filterable: true },
@@ -1014,6 +1018,7 @@ var COST_COLUMNS = [
   { key: 'label', label: 'Этикетка', numeric: true, filterable: true },
   { key: 'totalFl', label: 'Себес. фл.', numeric: true, filterable: true },
   { key: 'total', label: 'ИТОГО', numeric: true, filterable: true },
+  { key: 'manualMode', label: 'Ручной расчёт', numeric: false, filterable: true },
   { key: 'cost1C', label: 'Себес 1С', numeric: true, filterable: true },
   { key: 'diff', label: 'Разница', numeric: true, filterable: true },
   { key: 'diffPct', label: '%', numeric: true, filterable: true }
@@ -1031,17 +1036,19 @@ var COST_SLICER_FIELDS = [
 
 STATE.costFilters = STATE.costFilters || {};
 STATE.costSort = STATE.costSort || { key: null, dir: 'asc' };
+STATE.costLoaded = STATE.costLoaded || false;
 
 function runCalculation() {
   var p = getParamsFromUI();
   showLoading();
-  setStatus('cost-status', 'Расчёт...', 'info');
+  setStatus('cost-status', 'Пересчитываю себестоимость...', 'info');
   google.script.run
     .withSuccessHandler(function(res) {
       hideLoading();
-      if (!res.success) { setStatus('cost-status', res.message, 'error'); return; }
-      STATE.calcResults = res.results;
-      setStatus('cost-status', 'Рассчитано ' + res.count + ' позиций', 'success');
+      if (!res || !res.success) { setStatus('cost-status', (res && res.message) || 'Не удалось пересчитать себестоимость.', 'error'); return; }
+      STATE.costLoaded = true;
+      STATE.calcResults = res.results || [];
+      setStatus('cost-status', 'Пересчитано ' + res.count + ' позиций', 'success');
       renderCostTable(res.results);
       renderCostStats(res.results);
     })
@@ -1049,7 +1056,36 @@ function runCalculation() {
       hideLoading();
       setStatus('cost-status', 'Ошибка: ' + err.message, 'error');
     })
-    .calculateAll(p);
+    .recalculateAndStoreCostResults(p);
+}
+
+function loadCostStateUI() {
+  showLoading();
+  setStatus('cost-status', 'Загружаю сохранённую себестоимость...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('cost-status', (res && res.message) || 'Не удалось загрузить себестоимость.', 'error');
+        renderCostTable([]);
+        renderCostStats([]);
+        return;
+      }
+      STATE.costLoaded = true;
+      STATE.calcResults = res.results || [];
+      renderCostTable(STATE.calcResults);
+      renderCostStats(STATE.calcResults);
+      if (STATE.calcResults.length) {
+        setStatus('cost-status', 'Загружено позиций: ' + STATE.calcResults.length + (res.updatedAt ? ' | обновлено: ' + res.updatedAt : ''), 'success');
+      } else {
+        setStatus('cost-status', 'Нет сохранённого расчёта себестоимости.', 'info');
+      }
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('cost-status', 'Ошибка загрузки: ' + err.message, 'error');
+    })
+    .getCostState();
 }
 
 function renderCostTable(results) {
@@ -1121,6 +1157,8 @@ function getCostSearchQuery() {
 function getCostSearchHaystack(result) {
   return [
     String(result.name || ''),
+    String(result.articleWb || ''),
+    String(result.article || ''),
     String(result.flakonName || ''),
     String(result.category || ''),
     String(result.type || '')
@@ -1136,6 +1174,8 @@ function getCostRawValue(result, key) {
 function getCostDisplayValue(result, key) {
   var directTextKeys = {
     name: true,
+    article: true,
+    articleWb: true,
     flakonName: true,
     category: true,
     group1: true,
@@ -1144,6 +1184,7 @@ function getCostDisplayValue(result, key) {
     rawName: true,
     type: true
   };
+  if (key === 'manualMode') return result.manualMode ? 'Да' : '';
   if (directTextKeys[key]) return String(result[key] || '');
   if (key === 'diffPct') return result.cost1C > 0 ? (result.diffPct * 100).toFixed(1) + '%' : '—';
   return fmt(result[key]);
@@ -1352,12 +1393,16 @@ function renderCostRows(results) {
       var col = COST_COLUMNS[j];
       var td = document.createElement('td');
 
-      if (col.key === 'name' || col.key === 'flakonName' || col.key === 'category') {
+      if (col.key === 'name' || col.key === 'articleWb' || col.key === 'article' || col.key === 'flakonName' || col.key === 'category') {
         td.textContent = r.name || '';
+        if (col.key === 'articleWb') td.textContent = r.articleWb || '';
+        if (col.key === 'article') td.textContent = r.article || '';
         if (col.key === 'flakonName') td.textContent = r.flakonName || '';
         if (col.key === 'category') td.textContent = r.category || '';
       } else if (col.key === 'type') {
         td.innerHTML = '<span class="badge ' + badgeClass + '">' + esc(r.type) + '</span>';
+      } else if (col.key === 'manualMode') {
+        td.textContent = r.manualMode ? 'Да' : '';
       } else {
         var rawValue = getCostRawValue(r, col.key);
         td.className = 'num';
@@ -1372,6 +1417,47 @@ function renderCostRows(results) {
 
     tbody.appendChild(tr);
   }
+}
+
+function syncCostManualOverride_(rowData, table) {
+  if (!rowData || !rowData.rowKey) return;
+  showLoading();
+  setStatus('cost-status', 'Сохраняю ручную себестоимость...', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      if (!res || !res.success) {
+        setStatus('cost-status', (res && res.message) || 'Не удалось сохранить ручную себестоимость.', 'error');
+        loadCostStateUI();
+        return;
+      }
+
+      var updated = res.row || rowData;
+      if (table) {
+        var row = table.getRow(updated.rowKey);
+        if (row) row.update(updated);
+      }
+
+      for (var i = 0; i < STATE.calcResults.length; i++) {
+        if (STATE.calcResults[i].rowKey === updated.rowKey) {
+          STATE.calcResults[i] = Object.assign({}, STATE.calcResults[i], updated);
+          break;
+        }
+      }
+
+      renderCostStats(STATE.calcResults);
+      setStatus('cost-status', 'Ручная себестоимость сохранена', 'success');
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setStatus('cost-status', 'Ошибка сохранения ручной себестоимости: ' + err.message, 'error');
+      loadCostStateUI();
+    })
+    .saveCostManualOverride({
+      rowKey: rowData.rowKey,
+      manualMode: !!rowData.manualMode,
+      manualTotal: rowData.manualMode ? rowData.total : ''
+    });
 }
 
 function renderCostTable(results) {
@@ -1401,9 +1487,8 @@ function renderCostTable(results) {
     if (col.key === 'name') {
       colDef.frozen = true;
       colDef.minWidth = 200;
-      colDef.headerFilter = 'input';
       colDef.headerFilterPlaceholder = 'Поиск...';
-    } else if (col.key === 'flakonName' || col.key === 'category') {
+    } else if (col.key === 'articleWb' || col.key === 'article' || col.key === 'flakonName' || col.key === 'category') {
       colDef.minWidth = 120;
       colDef.headerFilter = 'input';
       colDef.headerFilterPlaceholder = 'Поиск...';
@@ -1417,8 +1502,38 @@ function renderCostTable(results) {
       colDef.formatterParams = { decimals: 2 };
       colDef.hozAlign = 'right';
       colDef.cssClass = 'col-total';
-      colDef.minWidth = 100;
-      colDef.headerFilter = false;
+      colDef.minWidth = 120;
+      colDef.editor = 'number';
+      colDef.editorParams = { step: 0.01, min: 0 };
+      colDef.editable = function(cell) {
+        return !!cell.getRow().getData().manualMode;
+      };
+      colDef.cellEdited = function(cell) {
+        var rowData = cell.getRow().getData();
+        syncCostManualOverride_(rowData, cell.getTable());
+      };
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Итого...';
+    } else if (col.key === 'manualMode') {
+      colDef.minWidth = 130;
+      colDef.hozAlign = 'center';
+      colDef.formatter = 'tickCross';
+      colDef.editor = 'tickCross';
+      colDef.editorParams = { tristate: false };
+      colDef.headerFilter = 'list';
+      colDef.headerFilterParams = { values: { '': 'Все', 'true': 'Да', 'false': 'Нет' } };
+      colDef.headerFilterFunc = function(headerValue, rowValue) {
+        if (headerValue === '') return true;
+        return String(!!rowValue) === headerValue;
+      };
+      colDef.cellEdited = function(cell) {
+        var rowData = cell.getRow().getData();
+        if (rowData.manualMode && (rowData.total === null || rowData.total === undefined || rowData.total === '')) {
+          rowData.total = rowData.calcTotal || 0;
+          cell.getRow().update({ total: rowData.total });
+        }
+        syncCostManualOverride_(rowData, cell.getTable());
+      };
     } else if (col.key === 'diff') {
       colDef.hozAlign = 'right';
       colDef.headerFilter = false;
@@ -1445,7 +1560,8 @@ function renderCostTable(results) {
       colDef.formatterParams = { decimals: 2 };
       colDef.hozAlign = 'right';
       colDef.minWidth = 85;
-      colDef.headerFilter = false;
+      colDef.headerFilter = 'input';
+      colDef.headerFilterPlaceholder = 'Фильтр...';
       colDef.cellClick = function(e, cell) {
         var val = cell.getValue();
         if (val !== null && val !== undefined && parseFloat(val) === 0) {
@@ -1466,17 +1582,21 @@ function renderCostTable(results) {
     height: '68vh',
     layout: 'fitDataFill',
     frozenRows: 0,
-    placeholder: 'Выполните расчёт для отображения результатов',
+    index: 'rowKey',
+    placeholder: 'Себестоимость будет показана после загрузки сохранённого расчёта',
     rowFormatter: function(row) {
       var d = row.getData();
       var cells = row.getCells();
       for (var i = 0; i < cells.length; i++) {
         var field = cells[i].getColumn().getField();
-        if (field !== 'name' && field !== 'flakonName' && field !== 'category' && field !== 'type') {
+        if (field !== 'name' && field !== 'articleWb' && field !== 'article' && field !== 'flakonName' && field !== 'category' && field !== 'type' && field !== 'manualMode') {
           var val = cells[i].getValue();
           if (val !== null && val !== undefined && parseFloat(val) === 0 && field !== 'diff' && field !== 'diffPct') {
             cells[i].getElement().classList.add('zero-val');
           }
+        }
+        if (field === 'total') {
+          cells[i].getElement().classList.toggle('manual-total-cell', !!d.manualMode);
         }
       }
     }
@@ -1581,10 +1701,33 @@ function onCalcSelect() {
   document.getElementById('calc-flakon').value  = String(row[8] || '').trim();
   document.getElementById('calc-cost1c').value  = parseFloat(row[14]) || 0; // COL.COST_1C = 14
   setCalcFlakonInputs(getFlakonByName(document.getElementById('calc-flakon').value || '') || null);
-  calcManual();
+  markCalcDirty();
+}
+
+function renderCalcPlaceholder_(message) {
+  var el = document.getElementById('calc-result');
+  if (!el) return;
+  el.innerHTML = '<div class="calc-empty-state"><p class="hint">' + esc(message || 'Заполните поля и нажмите «Рассчитать».') + '</p></div>';
+}
+
+function setCalcRunButtonState_(busy) {
+  var btn = document.getElementById('calc-run-btn');
+  if (!btn) return;
+  btn.disabled = !!busy;
+  btn.classList.toggle('is-busy', !!busy);
+}
+
+function markCalcDirty() {
+  STATE.calcDirty = true;
+  var btn = document.getElementById('calc-run-btn');
+  if (btn) btn.classList.add('is-dirty');
 }
 
 function calcManual() {
+  runManualCalculation();
+}
+
+function runManualCalculation() {
   var p = getCalcRuntimeParams();
   var nds = getNumericInputValue('calc-nds', 0.22);
   var tax = getNumericInputValue('calc-tax', 0.065);
@@ -1612,8 +1755,22 @@ function calcManual() {
       label: getOptionalNumericInputValue('calc-fl-label')
     }
   };
+  showLoading();
+  setCalcRunButtonState_(true);
   google.script.run
-    .withSuccessHandler(function(res) { renderCalcResult(res); })
+    .withSuccessHandler(function(res) {
+      hideLoading();
+      setCalcRunButtonState_(false);
+      STATE.calcDirty = false;
+      var btn = document.getElementById('calc-run-btn');
+      if (btn) btn.classList.remove('is-dirty');
+      renderCalcResult(res);
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      setCalcRunButtonState_(false);
+      renderCalcPlaceholder_('Ошибка расчёта: ' + err.message);
+    })
     .calculateManual(input);
 }
 
@@ -1625,7 +1782,7 @@ function formatPctValue_(value, total) {
 function buildCalcShareGroups_(result) {
   var total = parseFloat(result && result.total) || 0;
   var rawTotal = (parseFloat(result.raw) || 0) + (parseFloat(result.delivery) || 0) + (parseFloat(result.taxDuty) || 0);
-  var flakonTotal = (parseFloat(result.rawFl) || 0) + (parseFloat(result.deliveryFl) || 0) + (parseFloat(result.taxDutyFl) || 0);
+  var flakonTotal = (parseFloat(result.rawFl) || 0) + (parseFloat(result.deliveryFl) || 0) + (parseFloat(result.taxDutyFl) || 0) + (parseFloat(result.label) || 0);
   var labelTotal = parseFloat(result.label) || 0;
 
   return [
@@ -1648,15 +1805,7 @@ function buildCalcShareGroups_(result) {
       subs: [
         { title: 'Цена флакона', value: parseFloat(result.rawFl) || 0, color: '#0284c7' },
         { title: 'Доставка флакона', value: parseFloat(result.deliveryFl) || 0, color: '#38bdf8' },
-        { title: 'НДС и пошлина флакона', value: parseFloat(result.taxDutyFl) || 0, color: '#7dd3fc' }
-      ]
-    },
-    {
-      key: 'label',
-      title: 'Этикетка',
-      total: labelTotal,
-      color: '#6d28d9',
-      subs: [
+        { title: 'НДС и пошлина флакона', value: parseFloat(result.taxDutyFl) || 0, color: '#7dd3fc' },
         { title: 'Этикетка', value: labelTotal, color: '#8b5cf6' }
       ]
     }
@@ -1670,7 +1819,6 @@ function buildCalcResultHtml_(payload) {
   var result = payload.result || {};
   var diffClass = result.diff > 0 ? 'diff-pos' : (result.diff < 0 ? 'diff-neg' : 'diff-zero');
   var total = parseFloat(result.total) || 0;
-  var flakonTotal = parseFloat(result.totalFl) || 0;
   var visualHtml = buildCalcVisualHtml_(result, { embedded: true });
   var summaryHtml =
     '<div class="calc-summary-grid">' +
@@ -1683,11 +1831,6 @@ function buildCalcResultHtml_(payload) {
         '<span class="calc-summary-label">Тип</span>' +
         '<strong>' + esc(result.type || payload.type || '—') + '</strong>' +
         '<div class="calc-summary-note">Определён по текущим полям</div>' +
-      '</div>' +
-      '<div class="calc-summary-card">' +
-        '<span class="calc-summary-label">Себестоимость флакона</span>' +
-        '<strong>' + fmt(flakonTotal) + ' ₽</strong>' +
-        '<div class="calc-summary-note">Сумма упаковочного контура</div>' +
       '</div>' +
       '<div class="calc-summary-card">' +
         '<span class="calc-summary-label">Сравнение с 1С</span>' +
@@ -1706,7 +1849,6 @@ function buildCalcResultHtml_(payload) {
       '<tr><td>Доставка флакона</td><td class="num">' + fmt(result.deliveryFl) + '</td></tr>' +
       '<tr><td>НДС+пошлина флакона</td><td class="num">' + fmt(result.taxDutyFl) + '</td></tr>' +
       '<tr><td>Этикетка</td><td class="num">' + fmt(result.label) + '</td></tr>' +
-      '<tr><td>Себестоимость флакона</td><td class="num">' + fmt(result.totalFl) + '</td></tr>' +
       '<tr class="total-row"><td>ИТОГО</td><td class="num">' + fmt(result.total) + ' ₽</td></tr>' +
       (result.cost1C > 0
         ? '<tr class="diff-row"><td>Себестоимость 1С</td><td class="num">' + fmt(result.cost1C) + '</td></tr>' +
@@ -1787,8 +1929,19 @@ function buildCalcVisualHtml_(result, options) {
       '</div>';
   }
 
-  html +=
-    '<div class="calc-share-list">';
+  html += '<div class="calc-overall-chart">';
+  for (var g = 0; g < groups.length; g++) {
+    var topGroup = groups[g];
+    html +=
+      '<div class="calc-overall-item">' +
+        '<div class="calc-overall-track">' +
+          '<div class="calc-overall-fill" style="height:' + (topGroup.pct > 0 ? topGroup.pct.toFixed(2) : 0) + '%; background:' + topGroup.color + '"></div>' +
+        '</div>' +
+        '<div class="calc-overall-label">' + esc(topGroup.title) + '</div>' +
+        '<div class="calc-overall-value">' + fmt(topGroup.total) + ' ₽ · ' + formatPctValue_(topGroup.total, total) + '</div>' +
+      '</div>';
+  }
+  html += '</div><div class="calc-share-list">';
 
   for (var i = 0; i < groups.length; i++) {
     var group = groups[i];
@@ -1801,25 +1954,15 @@ function buildCalcVisualHtml_(result, options) {
             '<span class="calc-share-pct">' + formatPctValue_(group.total, total) + '</span>' +
           '</div>' +
         '</div>' +
-        '<div class="calc-share-bar">';
-
-    for (var s = 0; s < group.subs.length; s++) {
-      var sub = group.subs[s];
-      if (sub.value <= 0) continue;
-      html += '<span class="calc-share-fill" style="width:' + (group.total > 0 ? ((sub.value / group.total) * 100).toFixed(2) : 0) + '%; background:' + sub.color + '"></span>';
-    }
-
-    html +=
-        '</div>' +
-        '<div class="calc-subshare-list">';
+        '<div class="calc-subshare-list calc-subshare-columns">';
 
     for (var j = 0; j < group.subs.length; j++) {
       var item = group.subs[j];
       if (item.value <= 0) continue;
       html +=
-        '<div class="calc-subshare-row">' +
+        '<div class="calc-subshare-row calc-subshare-column">' +
+          '<div class="calc-subshare-track calc-subshare-track-vertical"><div class="calc-subshare-fill calc-subshare-fill-vertical" style="height:' + (group.total > 0 ? ((item.value / group.total) * 100).toFixed(2) : 0) + '%; background:' + item.color + '"></div></div>' +
           '<div class="calc-subshare-label">' + esc(item.title) + '</div>' +
-          '<div class="calc-subshare-track"><div class="calc-subshare-fill" style="width:' + (group.total > 0 ? ((item.value / group.total) * 100).toFixed(2) : 0) + '%; background:' + item.color + '"></div></div>' +
           '<div class="calc-subshare-value">' + fmt(item.value) + ' ₽ · ' + formatPctValue_(item.value, total) + '</div>' +
         '</div>';
     }
@@ -2456,7 +2599,7 @@ function onCalcSelect() {
   var idx = document.getElementById('calc-select').value;
   if (idx === '' || !STATE.exportData) {
     setCalcFlakonInputs();
-    calcManual();
+    markCalcDirty();
     return;
   }
   var row = STATE.exportData.rows[parseInt(idx, 10)];
@@ -2479,7 +2622,7 @@ function onCalcSelect() {
 function onCalcFlakonChange() {
   var flakon = getFlakonByName(document.getElementById('calc-flakon').value || '');
   setCalcFlakonInputs(flakon || null);
-  calcManual();
+  markCalcDirty();
 }
 
 window.addEventListener('load', function() {
@@ -2938,10 +3081,12 @@ function showTab(tabId) {
   if (tabId === 'params' && !STATE.params) loadParamsUI();
   if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
   if (tabId === 'bundles' && (!STATE.bundleData || !STATE.bundleData.rows || !STATE.bundleData.rows.length)) loadBundlesUI();
+  if (tabId === 'cost' && !STATE.costLoaded) loadCostStateUI();
   if (tabId === 'plan-cost' && (!STATE.planCost || !STATE.planCost.loaded)) loadPlanCostStateUI(true);
   if (tabId === 'calc') ensureFlakonsState(function() {
     populateCalcSelects();
     syncCalcParamsFromParams(STATE.params || getParamsFromUI());
+    if (!document.getElementById('calc-result').innerHTML.trim()) renderCalcPlaceholder_();
   });
   if (tabId === 'verify') populateVerifySelect();
   initIcons();
