@@ -439,7 +439,7 @@ function calculatePlanCosts(monthKey) {
     var flakonMap = buildFlakonMap(getFlakonList());
     var bundleContext = buildBundleContext_(params, flakonMap, dataRows);
     var results = [];
-    var unresolvedMatched = 0;
+    var unresolvedItems = [];
 
     for (i = 0; i < items.length; i++) {
       var item = items[i];
@@ -448,7 +448,7 @@ function calculatePlanCosts(monthKey) {
 
       var matchedRow = resolvePlanDataRow_(item, dataRows);
       if (!matchedRow) {
-        if (item.matched) unresolvedMatched++;
+        unresolvedItems.push(item);
         continue;
       }
 
@@ -473,7 +473,7 @@ function calculatePlanCosts(monthKey) {
       monthKey: month.key,
       monthLabel: month.label,
       results: results,
-      stats: buildPlanCalculationStats_(results, items, month.slotIndex, unresolvedMatched)
+      stats: buildPlanCalculationStats_(results, unresolvedItems)
     };
   } catch (err) {
     return planErrorResponse_('Ошибка расчёта плана: ' + err.message, err);
@@ -977,11 +977,11 @@ function applyPlanChildrenTotals_(row) {
   return row;
 }
 
-function buildPlanCalculationStats_(results, allItems, monthIndex, unresolvedMatched) {
+function buildPlanCalculationStats_(results, unresolvedItems) {
   var stats = {
     totalBudget: 0,
     totalPlanQty: 0,
-    unmatchedItems: unresolvedMatched,
+    unmatchedItems: 0,
     unmatchedList: [],
     types: { raw: 0, finished: 0, flakons: 0, sets: 0 },
     rawPlan: 0,
@@ -994,7 +994,6 @@ function buildPlanCalculationStats_(results, allItems, monthIndex, unresolvedMat
     totalFlPlan: 0
   };
 
-  unresolvedMatched = toNumber_(unresolvedMatched, 0);
   for (var i = 0; i < results.length; i++) {
     var row = results[i];
     stats.totalBudget += toNumber_(row.totalPlan, 0);
@@ -1014,13 +1013,11 @@ function buildPlanCalculationStats_(results, allItems, monthIndex, unresolvedMat
     else stats.types.sets++;
   }
 
-  for (i = 0; i < allItems.length; i++) {
-    if (!allItems[i].matched && toNumber_(allItems[i].monthQtys[monthIndex], 0) > 0) {
-      unresolvedMatched++;
-      stats.unmatchedList.push(formatPlanUnmatchedItemLabel_(allItems[i]));
-    }
+  unresolvedItems = unresolvedItems || [];
+  for (i = 0; i < unresolvedItems.length; i++) {
+    stats.unmatchedList.push(formatPlanUnmatchedItemLabel_(unresolvedItems[i]));
   }
-  stats.unmatchedItems = unresolvedMatched;
+  stats.unmatchedItems = stats.unmatchedList.length;
 
   stats.totalBudget = round2_(stats.totalBudget);
   stats.totalPlanQty = round2_(stats.totalPlanQty);
