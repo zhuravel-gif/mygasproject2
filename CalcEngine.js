@@ -104,7 +104,48 @@ function buildDataRowMap_(rows) {
   return map;
 }
 
-function buildBundleContext_(params, flakonMap, dataRows) {
+function buildStoredCostResultMap_() {
+  var map = {};
+  if (typeof getStoredCostResults_ !== 'function' || typeof getCostLookupKeys_ !== 'function') return map;
+
+  var rows = getStoredCostResults_();
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    if (!row.name) continue;
+
+    var entry = {
+      total: round2_(toNumber_(row.total, 0)),
+      source: row.manualMode ? 'Сохранённая себестоимость (ручной расчёт)' : 'Сохранённая себестоимость',
+      type: row.type || '',
+      specification: '',
+      items: [],
+      result: row
+    };
+    var keys = getCostLookupKeys_(row.name, row.articleWb, row.article);
+    for (var j = 0; j < keys.length; j++) {
+      if (keys[j] && !map.hasOwnProperty(keys[j])) map[keys[j]] = entry;
+    }
+  }
+
+  return map;
+}
+
+function getStoredCostInfo_(row, bundleContext, fallbackName) {
+  if (!bundleContext || !bundleContext.preferStoredCosts || !bundleContext.storedCostMap) return null;
+  if (typeof getCostLookupKeys_ !== 'function') return null;
+
+  var keys = row
+    ? getCostLookupKeys_(row[COL.NAME], row[COL.ART_WB], row[COL.ART])
+    : getCostLookupKeys_(fallbackName, '', '');
+
+  for (var i = 0; i < keys.length; i++) {
+    if (bundleContext.storedCostMap.hasOwnProperty(keys[i])) return bundleContext.storedCostMap[keys[i]];
+  }
+  return null;
+}
+
+function buildBundleContext_(params, flakonMap, dataRows, options) {
+  options = options || {};
   var bundleRows = typeof getStoredBundleRows_ === 'function' ? getStoredBundleRows_() : [];
   var bundles = {};
   var dataRowMap = buildDataRowMap_(dataRows || []);
@@ -139,6 +180,8 @@ function buildBundleContext_(params, flakonMap, dataRows) {
     dataRows: dataRows || [],
     dataRowMap: dataRowMap,
     bundles: bundles,
+    preferStoredCosts: options.preferStoredCosts === true,
+    storedCostMap: buildStoredCostResultMap_(),
     overrideMap: typeof getCostOverrideMap_ === 'function' ? getCostOverrideMap_() : {},
     cache: {}
   };
@@ -156,6 +199,7 @@ function getBundleActiveRows_(bundleName, bundleContext) {
 }
 
 function buildBundleItemSource_(calcCost, manualCost, detailsSource) {
+  if (detailsSource && detailsSource.indexOf('Сохранённая себестоимость') === 0) return detailsSource;
   if (calcCost > 0) return detailsSource || 'Расчёт';
   if (manualCost > 0) return 'Ручная стоимость';
   return 'Нет данных';
@@ -234,6 +278,14 @@ function calculateNamedCostInfo_(name, bundleContext, stack) {
   var row = bundleContext.dataRowMap[key];
   var result;
 
+  if (!row) {
+    var storedOnlyCost = getStoredCostInfo_(null, bundleContext, name);
+    if (storedOnlyCost) {
+      bundleContext.cache[key] = storedOnlyCost;
+      return storedOnlyCost;
+    }
+  }
+
   if (row) {
     var override = getCostOverrideForRow_(row, bundleContext.overrideMap);
     if (override && override.manualMode) {
@@ -244,6 +296,13 @@ function calculateNamedCostInfo_(name, bundleContext, stack) {
         specification: '',
         items: []
       };
+      bundleContext.cache[key] = result;
+      return result;
+    }
+
+    var storedCost = getStoredCostInfo_(row, bundleContext, name);
+    if (storedCost) {
+      result = storedCost;
       bundleContext.cache[key] = result;
       return result;
     }
@@ -323,7 +382,7 @@ function buildBundleUiState_() {
   var params = getParams();
   var dataObj = getData();
   var flakonMap = buildFlakonMap(getFlakonList());
-  var bundleContext = buildBundleContext_(params, flakonMap, dataObj.rows || []);
+  var bundleContext = buildBundleContext_(params, flakonMap, dataObj.rows || [], { preferStoredCosts: true });
   var storedRows = typeof getStoredBundleRows_ === 'function' ? getStoredBundleRows_() : [];
   var resolvedRows = [];
   var bundleNames = {};
