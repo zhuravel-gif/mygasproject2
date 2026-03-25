@@ -132,11 +132,16 @@ function buildStoredCostResultMap_() {
 
 function getStoredCostInfo_(row, bundleContext, fallbackName) {
   if (!bundleContext || !bundleContext.preferStoredCosts || !bundleContext.storedCostMap) return null;
-  if (typeof getCostLookupKeys_ !== 'function') return null;
+  var keys = [];
+  var nameKey = normalizeMatchKey_(row ? row[COL.NAME] : fallbackName);
+  var wbKey = normalizeMatchKey_(row ? row[COL.ART_WB] : '');
+  var articleKey = normalizeMatchKey_(row ? row[COL.ART] : '');
 
-  var keys = row
-    ? getCostLookupKeys_(row[COL.NAME], row[COL.ART_WB], row[COL.ART])
-    : getCostLookupKeys_(fallbackName, '', '');
+  // Bundle components are imported and matched by name, so exact-name lookup
+  // should win over broader article-based keys that may collide.
+  if (nameKey) keys.push('name:' + nameKey);
+  if (wbKey) keys.push('wb:' + wbKey);
+  if (articleKey) keys.push('art:' + articleKey);
 
   for (var i = 0; i < keys.length; i++) {
     if (bundleContext.storedCostMap.hasOwnProperty(keys[i])) return bundleContext.storedCostMap[keys[i]];
