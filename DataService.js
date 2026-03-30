@@ -40,6 +40,31 @@ var CFG = {
   TOTAL_COLS: 18
 };
 
+/* ── Execution-scoped sheet read cache ── */
+var _sheetCache = {};
+
+function _cachedSheetRead(sheetName) {
+  if (_sheetCache[sheetName]) return _sheetCache[sheetName];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 1) {
+    _sheetCache[sheetName] = null;
+    return null;
+  }
+  var data = sheet.getDataRange().getValues();
+  _sheetCache[sheetName] = data;
+  return data;
+}
+
+function _invalidateCache(sheetName) {
+  if (sheetName) {
+    delete _sheetCache[sheetName];
+  } else {
+    _sheetCache = {};
+  }
+}
+/* ── End cache ── */
+
 var COST_RESULT_HEADERS = [
   'Ключ',
   'Номенклатура',
@@ -161,6 +186,7 @@ function importBaseNomenclature(payload) {
   formatDataSheet_(sheet, rows.length);
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
+  _invalidateCache(CFG.DATA);
   saveImportMapping_('nomenclature', payload.mapping || null);
 
   return {
@@ -191,23 +217,32 @@ function updateImportRows(updates) {
 
   removeSheetProtections_(sheet);
 
+  var numRows = sheet.getLastRow() - 1;
+  var colStart = CFG.PRICE_COL + 1;
+  var colCount = CFG.TAX_COL - CFG.PRICE_COL + 1;
+  var range = sheet.getRange(2, colStart, numRows, colCount);
+  var values = range.getValues();
+
   for (var i = 0; i < updates.length; i++) {
     var item = updates[i];
-    var rowNumber = Number(item.row) + 2;
+    var rowIdx = Number(item.row);
+    if (rowIdx < 0 || rowIdx >= numRows) continue;
 
     if (item.supplierPrice !== undefined) {
-      sheet.getRange(rowNumber, CFG.PRICE_COL + 1).setValue(coerceNumber_(item.supplierPrice));
+      values[rowIdx][0] = coerceNumber_(item.supplierPrice);
     }
     if (item.nds !== undefined) {
-      sheet.getRange(rowNumber, CFG.NDS_COL + 1).setValue(normalizeRateValue_(item.nds, 0.22));
+      values[rowIdx][1] = normalizeRateValue_(item.nds, 0.22);
     }
     if (item.tax !== undefined) {
-      sheet.getRange(rowNumber, CFG.TAX_COL + 1).setValue(normalizeRateValue_(item.tax, 0.065));
+      values[rowIdx][2] = normalizeRateValue_(item.tax, 0.065);
     }
   }
 
+  range.setValues(values);
+  _invalidateCache(CFG.DATA);
   SpreadsheetApp.flush();
-  formatDataSheet_(sheet, sheet.getLastRow() - 1);
+  formatDataSheet_(sheet, numRows);
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
   return { success: true, count: updates.length };
@@ -238,6 +273,7 @@ function updateAllNdsTax(nds, tax) {
 
   sheet.getRange(2, CFG.NDS_COL + 1, numRows, 1).setValues(ndsVals);
   sheet.getRange(2, CFG.TAX_COL + 1, numRows, 1).setValues(taxVals);
+  _invalidateCache(CFG.DATA);
   formatDataSheet_(sheet, numRows);
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
@@ -245,13 +281,10 @@ function updateAllNdsTax(nds, tax) {
 }
 
 function getData() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.DATA);
-  if (!sheet || sheet.getLastRow() < 1) {
+  var data = _cachedSheetRead(CFG.DATA);
+  if (!data || data.length < 1) {
     return { headers: getProjectHeaders_(), rows: [], typeColIndex: -1 };
   }
-
-  var data = sheet.getDataRange().getValues();
   if (data.length < 2) {
     return { headers: data[0] || getProjectHeaders_(), rows: [], typeColIndex: -1 };
   }
@@ -294,9 +327,8 @@ function getDataRowType_(row, flakonMap) {
 }
 
 function getParams() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.BASIS);
-  if (!sheet || sheet.getLastRow() < 2) {
+  var cached = _cachedSheetRead(CFG.BASIS);
+  if (!cached || cached.length < 2) {
     return {
       usd: 92,
       rmb: 12.8,
@@ -311,7 +343,7 @@ function getParams() {
     };
   }
 
-  var data = sheet.getRange(2, 1, 1, 10).getValues()[0];
+  var data = cached[1];
   return {
     usd: hasValue_(data[0]) ? data[0] : 92,
     rmb: hasValue_(data[1]) ? data[1] : 12.8,
@@ -346,17 +378,16 @@ function saveParams(p) {
       normalizeRateValue_(p.flakonNds, 0.22),
       normalizeRateValue_(p.flakonTax, 0.065)
     ]]);
+  _invalidateCache(CFG.BASIS);
   return { success: true };
 }
 
 function getFlakonList() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var flSheet = ss.getSheetByName(CFG.FLAKONS);
   var savedMap = {};
   var params = getParams();
 
-  if (flSheet && flSheet.getLastRow() > 1) {
-    var flData = flSheet.getDataRange().getValues();
+  var flData = _cachedSheetRead(CFG.FLAKONS);
+  if (flData && flData.length > 1) {
     var flHeaders = flData[0] || [];
     for (var i = 1; i < flData.length; i++) {
       var savedName = String(flData[i][0] || '').trim();
@@ -365,12 +396,10 @@ function getFlakonList() {
     }
   }
 
-  var dataSheet = ss.getSheetByName(CFG.DATA);
-  if (!dataSheet || dataSheet.getLastRow() < 2) {
+  var data = _cachedSheetRead(CFG.DATA);
+  if (!data || data.length < 2) {
     return recalculateFlakonList_(mapValues_(savedMap), params);
   }
-
-  var data = dataSheet.getDataRange().getValues();
   var flakonMap = {};
   var productByName = {};
 
@@ -443,6 +472,7 @@ function saveFlakonData(flakons) {
     sheet.getRange(2, 5, rows.length - 1, 2).setNumberFormat('0.0%');
   }
 
+  _invalidateCache(CFG.FLAKONS);
   return { success: true, count: normalized.length, flakons: normalized };
 }
 
@@ -607,11 +637,8 @@ function getBundleHeaders_() {
 }
 
 function getStoredBundleRows_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.BUNDLES);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-
-  var data = sheet.getDataRange().getValues();
+  var data = _cachedSheetRead(CFG.BUNDLES);
+  if (!data || data.length < 2) return [];
   var headers = data[0] || [];
   var rows = [];
   for (var i = 1; i < data.length; i++) {
@@ -670,6 +697,7 @@ function writeBundleSheetRows_(rows) {
   if (values.length > 1) {
     sheet.getRange(2, 4, values.length - 1, 5).setNumberFormat('#,##0.00');
   }
+  _invalidateCache(CFG.BUNDLES);
 }
 
 function refreshBundleSheetComputed_() {
@@ -708,6 +736,7 @@ function refreshBundleSheetComputed_() {
   if (rows.length > 1) {
     sheet.getRange(2, 4, rows.length - 1, 5).setNumberFormat('#,##0.00');
   }
+  _invalidateCache(CFG.BUNDLES);
 }
 
 function saveResults(results) {
@@ -876,11 +905,8 @@ function saveCostManualOverride(payload) {
 }
 
 function getStoredCostResults_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(CFG.RESULTS);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-
-  var values = sheet.getDataRange().getValues();
+  var values = _cachedSheetRead(CFG.RESULTS);
+  if (!values || values.length < 2) return [];
   if (!values.length || !isCurrentCostResultsSchema_(values[0])) return [];
   var rows = [];
   for (var i = 1; i < values.length; i++) {
@@ -961,6 +987,7 @@ function writeStoredCostResults_(results, options) {
   sheet.clear();
   sheet.getRange(1, 1, rows.length, COST_RESULT_HEADERS.length).setValues(rows);
   formatStoredCostSheet_(sheet, rows.length - 1);
+  _invalidateCache(CFG.RESULTS);
 }
 
 function getStoredCostManualMap_() {
@@ -1164,6 +1191,7 @@ function importMappedValues_(payload, targetCol, label, mappingType) {
   }
 
   sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+  _invalidateCache(CFG.DATA);
   formatDataSheet_(sheet, data.length - 1);
   applyWarningProtection_(sheet, '1cData — данные импортированы');
   saveImportMapping_(mappingType, payload.mapping || null);
@@ -1279,12 +1307,11 @@ function getMetaSheet_() {
 }
 
 function getMetaValue_(key) {
-  var sheet = getMetaSheet_();
-  if (sheet.getLastRow() < 2) return '';
-
-  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
-  for (var i = 0; i < values.length; i++) {
-    if (values[i][0] === key) return values[i][1];
+  getMetaSheet_();
+  var data = _cachedSheetRead(CFG.META);
+  if (!data || data.length < 2) return '';
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === key) return data[i][1];
   }
   return '';
 }
@@ -1294,6 +1321,7 @@ function setMetaValue_(key, value) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) {
     sheet.getRange(2, 1, 1, 2).setValues([[key, value]]);
+    _invalidateCache(CFG.META);
     return;
   }
 
@@ -1301,11 +1329,13 @@ function setMetaValue_(key, value) {
   for (var i = 0; i < values.length; i++) {
     if (values[i][0] === key) {
       sheet.getRange(i + 2, 2).setValue(value);
+      _invalidateCache(CFG.META);
       return;
     }
   }
 
   sheet.getRange(lastRow + 1, 1, 1, 2).setValues([[key, value]]);
+  _invalidateCache(CFG.META);
 }
 
 function getSavedImportMapping_(type) {
