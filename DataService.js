@@ -583,6 +583,12 @@ function getBundleStats() {
   };
 }
 
+function getExportPageData() {
+  var data = getData();
+  var stats = getBundleStats();
+  return { data: data, bundleStats: stats };
+}
+
 function saveBundleData(payload) {
   payload = payload || {};
   var existingRows = getStoredBundleRows_();
@@ -1285,9 +1291,11 @@ function formatDataSheet_(sheet, rowCount) {
 }
 
 function removeSheetProtections_(sheet) {
-  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(protection) {
-    protection.remove();
-  });
+  var protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  if (!protections.length) return;
+  for (var i = 0; i < protections.length; i++) {
+    protections[i].remove();
+  }
 }
 
 function applyWarningProtection_(sheet, description) {

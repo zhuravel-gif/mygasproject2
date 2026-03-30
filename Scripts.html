@@ -551,21 +551,6 @@ function saveRateEditsUI() {
 // ============================================================
 // TAB 1 — RENDER EXPORT TABLE
 // ============================================================
-function loadExportData() {
-  showLoading();
-  google.script.run
-    .withSuccessHandler(function(data) {
-      hideLoading();
-      STATE.exportData = data;
-      renderExportTable(data);
-      renderExportStats(data);
-    })
-    .withFailureHandler(function(err) {
-      hideLoading();
-      setStatus('export-status', 'Ошибка загрузки: ' + err.message, 'error');
-    })
-    .getData();
-}
 
 // Индексы в строке данных (соответствуют CFG в DataService.js)
 var EXPORT_PRICE_COL = 15;
@@ -2193,7 +2178,6 @@ function esc(s) {
 // ИНИЦИАЛИЗАЦИЯ
 // ============================================================
 window.addEventListener('load', function() {
-  loadExportData();
   loadParamsUI();
   initIcons();
   /* Convert param-help divs into Tippy tooltips on their labels */
@@ -3212,6 +3196,7 @@ function showTab(tabId) {
     if (names[i] === tabId && tabs[i]) tabs[i].classList.add('active');
   }
   if (tabId === 'params' && !STATE.params) loadParamsUI();
+  if (tabId === 'export' && !STATE.exportData) loadExportData();
   if (tabId === 'flakons' && STATE.flakons.length === 0) loadFlakonsUI();
   if (tabId === 'bundles' && (!STATE.bundleData || !STATE.bundleData.rows || !STATE.bundleData.rows.length)) loadBundlesUI();
   if (tabId === 'cost' && !STATE.costLoaded) loadCostStateUI();
@@ -3228,28 +3213,19 @@ function showTab(tabId) {
 function loadExportData() {
   showLoading();
   google.script.run
-    .withSuccessHandler(function(data) {
+    .withSuccessHandler(function(result) {
+      hideLoading();
+      var data = result.data;
       STATE.exportData = data;
-      google.script.run
-        .withSuccessHandler(function(bundleStats) {
-          hideLoading();
-          STATE.bundleStats = bundleStats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 };
-          renderExportTable(data);
-          renderExportStats(data);
-        })
-        .withFailureHandler(function() {
-          hideLoading();
-          STATE.bundleStats = { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 };
-          renderExportTable(data);
-          renderExportStats(data);
-        })
-        .getBundleStats();
+      STATE.bundleStats = result.bundleStats || { totalSets: 0, loadedBundles: 0, compositionRows: 0, unresolvedComponents: 0 };
+      renderExportTable(data);
+      renderExportStats(data);
     })
     .withFailureHandler(function(err) {
       hideLoading();
       setStatus('export-status', 'Ошибка загрузки: ' + err.message, 'error');
     })
-    .getData();
+    .getExportPageData();
 }
 
 function renderExportStats(data) {
