@@ -304,7 +304,7 @@ function importPlanCosts(payload) {
       return planErrorResponse_('После строки заголовков не найдено строк плана.');
     }
 
-    var dataObj = getData();
+    var dataObj = getDataRaw_();
     var dataRowsCurrent = dataObj.rows || [];
     var matchMaps = buildPlanMatchMaps_(dataRowsCurrent);
     var flakonMap = buildFlakonMap(getFlakonList());
@@ -431,7 +431,7 @@ function calculatePlanCosts(monthKey) {
       }
     }
 
-    var dataObj = getData();
+    var dataObj = getDataRaw_();
     var dataRows = dataObj.rows || [];
     if (!dataRows.length) return planErrorResponse_('Сначала загрузите данные на вкладке Импорт данных.');
 

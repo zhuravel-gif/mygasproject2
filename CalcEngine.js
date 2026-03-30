@@ -385,7 +385,7 @@ function calculateBundleCostByName_(bundleName, row, bundleContext, stack) {
 
 function buildBundleUiState_() {
   var params = getParams();
-  var dataObj = getData();
+  var dataObj = getDataRaw_();
   var flakonMap = buildFlakonMap(getFlakonList());
   var bundleContext = buildBundleContext_(params, flakonMap, dataObj.rows || [], { preferStoredCosts: true });
   var storedRows = typeof getStoredBundleRows_ === 'function' ? getStoredBundleRows_() : [];
@@ -560,7 +560,7 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
   };
 
   if (type === 'Наборы') {
-    var runtimeContext = bundleContext || buildBundleContext_(params, flakonMap, getData().rows || []);
+    var runtimeContext = bundleContext || buildBundleContext_(params, flakonMap, getDataRaw_().rows || []);
     var bundleCalc = calculateBundleCostByName_(name, row, runtimeContext, stack || {});
     result.total = round2_(bundleCalc.total);
     result.calcTotal = result.total;
@@ -640,7 +640,7 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
 }
 
 function calculateAll(params, overrideRows) {
-  var dataObj = getData();
+  var dataObj = getDataRaw_();
   if (!dataObj.rows || dataObj.rows.length === 0) {
     return {
       success: false,
@@ -666,7 +666,7 @@ function calculateAll(params, overrideRows) {
 }
 
 function calculateByIndex(index, params) {
-  var dataObj = getData();
+  var dataObj = getDataRaw_();
   if (!dataObj.rows || index < 0 || index >= dataObj.rows.length) {
     return { success: false, message: 'Позиция не найдена.' };
   }
@@ -901,7 +901,7 @@ function calculateManual(input) {
 
   var flakons = getFlakonList();
   var flakonMap = buildFlakonMap(flakons);
-  var dataObj = getData();
+  var dataObj = getDataRaw_();
   var bundleContext = buildBundleContext_(input, flakonMap, dataObj.rows || []);
   var manualFlakon = input.manualFlakon || {};
   var flakonNameOverride = String(input.flakonName || '').trim();
@@ -920,7 +920,7 @@ function calculateManual(input) {
 }
 
 function getVerification(index, params) {
-  var dataObj = getData();
+  var dataObj = getDataRaw_();
   if (!dataObj.rows || index < 0 || index >= dataObj.rows.length) {
     return { success: false, message: 'Позиция не найдена.' };
   }

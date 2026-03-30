@@ -215,7 +215,10 @@ function updateImportRows(updates) {
     return { success: false, message: 'Лист 1cData не заполнен.' };
   }
 
-  removeSheetProtections_(sheet);
+  // Skip costly protection removal/reapplication for small edits —
+  // warning-only protection does not block setValues()
+  var skipProtection = updates.length <= 10;
+  if (!skipProtection) removeSheetProtections_(sheet);
 
   var numRows = sheet.getLastRow() - 1;
   var colStart = CFG.PRICE_COL + 1;
@@ -243,7 +246,7 @@ function updateImportRows(updates) {
   _invalidateCache(CFG.DATA);
   SpreadsheetApp.flush();
   formatDataSheet_(sheet, numRows);
-  applyWarningProtection_(sheet, '1cData — данные импортированы');
+  if (!skipProtection) applyWarningProtection_(sheet, '1cData — данные импортированы');
 
   return { success: true, count: updates.length };
 }
@@ -280,20 +283,26 @@ function updateAllNdsTax(nds, tax) {
   return { success: true, count: numRows };
 }
 
-function getData() {
+function getDataRaw_() {
   var data = _cachedSheetRead(CFG.DATA);
   if (!data || data.length < 1) {
-    return { headers: getProjectHeaders_(), rows: [], typeColIndex: -1 };
+    return { headers: getProjectHeaders_(), rows: [] };
   }
   if (data.length < 2) {
-    return { headers: data[0] || getProjectHeaders_(), rows: [], typeColIndex: -1 };
+    return { headers: data[0] || getProjectHeaders_(), rows: [] };
+  }
+  return { headers: data[0].slice(), rows: data.slice(1) };
+}
+
+function getData() {
+  var raw = getDataRaw_();
+  if (!raw.rows.length) {
+    return { headers: raw.headers, rows: [], typeColIndex: -1 };
   }
 
-  var headers = data[0].slice();
-  var rows = data.slice(1);
-  var typeHeader = 'Тип товара';
+  var headers = raw.headers.slice();
   var typeColIndex = headers.length;
-  headers.push(typeHeader);
+  headers.push('Тип товара');
 
   var flakonMap = null;
   if (typeof buildFlakonMap === 'function' && typeof getFlakonList === 'function') {
@@ -301,8 +310,8 @@ function getData() {
   }
 
   var enrichedRows = [];
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i].slice();
+  for (var i = 0; i < raw.rows.length; i++) {
+    var row = raw.rows[i].slice();
     row.push(getDataRowType_(row, flakonMap || {}));
     enrichedRows.push(row);
   }
@@ -531,7 +540,7 @@ function importBundleCompositions(payload) {
     row.active = row.specification === activeSpec;
   }
 
-  writeBundleSheetRows_(rows);
+  _injectBundleRowsToCache_(rows);
   refreshBundleSheetComputed_();
   saveImportMapping_('bundles', payload.mapping || null);
 
@@ -561,7 +570,7 @@ function getBundleStats() {
   var totalSets = 0;
   var linked = {};
   var knownSetNames = {};
-  var data = getData();
+  var data = getDataRaw_();
   var i;
 
   for (i = 0; i < data.rows.length; i++) {
@@ -619,7 +628,7 @@ function saveBundleData(payload) {
     }
   }
 
-  writeBundleSheetRows_(existingRows);
+  _injectBundleRowsToCache_(existingRows);
   refreshBundleSheetComputed_();
   var data = getBundleData();
   data.success = true;
@@ -653,6 +662,23 @@ function getStoredBundleRows_() {
     rows.push(item);
   }
   return rows;
+}
+
+function _injectBundleRowsToCache_(bundleRows) {
+  var cacheRows = [getBundleHeaders_()];
+  for (var i = 0; i < bundleRows.length; i++) {
+    var cr = bundleRows[i];
+    cacheRows.push([
+      cr.component || '', cr.bundle || '', cr.specification || '',
+      toNumber_(cr.quantity, 1), cr.active ? 'Да' : '',
+      hasValue_(cr.cost1C) ? toNumber_(cr.cost1C, 0) : '',
+      hasValue_(cr.calcCost) ? toNumber_(cr.calcCost, 0) : '',
+      cr.manualCost === '' ? '' : toNumber_(cr.manualCost, 0),
+      hasValue_(cr.usedCost) ? toNumber_(cr.usedCost, 0) : '',
+      cr.source || ''
+    ]);
+  }
+  _sheetCache[CFG.BUNDLES] = cacheRows;
 }
 
 function normalizeStoredBundleRow_(row) {
@@ -812,7 +838,7 @@ function getCostState() {
   try {
     var rows = getStoredCostResults_();
     if (!rows.length) {
-      var data = getData();
+      var data = getDataRaw_();
       if (!data.rows || !data.rows.length) {
         return { success: true, results: [], count: 0, stats: { raw: 0, finished: 0, flakons: 0, sets: 0, totalCost: 0, total1C: 0 } };
       }
