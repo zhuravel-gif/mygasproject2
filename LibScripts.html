@@ -1,22 +1,37 @@
-<!-- CDN: Popper.js (required by Tippy) -->
-<script src="https://unpkg.com/@popperjs/core@2"></script>
-
-<!-- CDN: Tippy.js -->
-<script src="https://unpkg.com/tippy.js@6"></script>
-
-<!-- CDN: Toastify -->
-<script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
-
-<!-- CDN: SweetAlert2 -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-<!-- CDN: Tabulator -->
+<!-- CDN: Tabulator (synchronous — needed immediately for table rendering) -->
 <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
-<!-- CDN: Lucide Icons -->
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-
 <script>
+/* ── Async CDN loader ── */
+function loadScript(url, callback) {
+  var s = document.createElement('script');
+  s.src = url;
+  s.onload = callback || function() {};
+  s.onerror = function() { console.warn('Failed to load: ' + url); };
+  document.head.appendChild(s);
+}
+
+var _cdnReady = { tippy: false, toastify: false, swal: false, lucide: false };
+
+(function loadAsyncLibs() {
+  loadScript('https://unpkg.com/@popperjs/core@2', function() {
+    loadScript('https://unpkg.com/tippy.js@6', function() {
+      _cdnReady.tippy = true;
+      initTooltips();
+    });
+  });
+  loadScript('https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js', function() {
+    _cdnReady.toastify = true;
+  });
+  loadScript('https://cdn.jsdelivr.net/npm/sweetalert2@11', function() {
+    _cdnReady.swal = true;
+  });
+  loadScript('https://unpkg.com/lucide@latest/dist/umd/lucide.min.js', function() {
+    _cdnReady.lucide = true;
+    initIcons();
+  });
+})();
+
 /* ── Tabulator helper ── */
 function createTable(containerId, columns, data, opts) {
   var el = document.getElementById(containerId);
@@ -46,6 +61,7 @@ function createTable(containerId, columns, data, opts) {
 
 /* ── Toast helpers ── */
 function showToast(message, type) {
+  if (typeof Toastify === 'undefined') return;
   var bgMap = {
     success: 'linear-gradient(135deg, #22c55e, #16a34a)',
     error: 'linear-gradient(135deg, #ef4444, #dc2626)',
@@ -66,6 +82,7 @@ function showToast(message, type) {
 
 /* ── SweetAlert2 helpers ── */
 function showAlert(title, text, icon) {
+  if (typeof Swal === 'undefined') { alert(title + ': ' + text); return; }
   return Swal.fire({
     title: title,
     text: text,
@@ -75,6 +92,7 @@ function showAlert(title, text, icon) {
 }
 
 function showConfirm(title, text) {
+  if (typeof Swal === 'undefined') { return Promise.resolve({ isConfirmed: confirm(title + '\n' + text) }); }
   return Swal.fire({
     title: title,
     text: text,
