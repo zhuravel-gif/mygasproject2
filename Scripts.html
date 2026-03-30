@@ -493,25 +493,6 @@ function onNdsTaxChange(rowIdx, field, value) {
   NDS_TAX_TIMER = setTimeout(flushNdsTaxUpdates, 1500);
 }
 
-function flushNdsTaxUpdates() {
-  var updates = [];
-  for (var rowIdx in NDS_TAX_PENDING) {
-    var u = NDS_TAX_PENDING[rowIdx];
-    updates.push({ row: parseInt(rowIdx), nds: u.nds, tax: u.tax });
-  }
-  NDS_TAX_PENDING = {};
-  if (!updates.length) return;
-
-  google.script.run
-    .withSuccessHandler(function() {
-      setStatus('export-status', '✓ НДС/Пошлина сохранены (' + updates.length + ' строк)', 'success');
-    })
-    .withFailureHandler(function(err) {
-      setStatus('export-status', 'Ошибка сохранения НДС/Пошлины: ' + err.message, 'error');
-    })
-    .updateNdsTax(updates);
-}
-
 function applyRatesToAllUI() {
   var ndsInput = document.getElementById('bulk-nds');
   var taxInput = document.getElementById('bulk-tax');
@@ -1085,6 +1066,37 @@ STATE.costLoaded = STATE.costLoaded || false;
 STATE.costDirty = STATE.costDirty || false;
 
 function runCalculation() {
+  clearTimeout(NDS_TAX_TIMER);
+  var pendingUpdates = [];
+  for (var rowIdx in NDS_TAX_PENDING) {
+    if (!NDS_TAX_PENDING.hasOwnProperty(rowIdx)) continue;
+    var item = NDS_TAX_PENDING[rowIdx];
+    var update = { row: parseInt(rowIdx, 10) };
+    if (item.supplierPrice !== undefined) update.supplierPrice = item.supplierPrice;
+    if (item.nds !== undefined) update.nds = item.nds;
+    if (item.tax !== undefined) update.tax = item.tax;
+    pendingUpdates.push(update);
+  }
+  NDS_TAX_PENDING = {};
+
+  if (pendingUpdates.length) {
+    showLoading();
+    setStatus('cost-status', 'Сохраняю правки и пересчитываю...', 'info');
+    google.script.run
+      .withSuccessHandler(function() {
+        runCalculationCore_();
+      })
+      .withFailureHandler(function(err) {
+        hideLoading();
+        setStatus('cost-status', 'Ошибка сохранения правок: ' + err.message, 'error');
+      })
+      .updateImportRows(pendingUpdates);
+    return;
+  }
+  runCalculationCore_();
+}
+
+function runCalculationCore_() {
   var p = getParamsFromUI();
   var currentRows = getCurrentCostRows_();
   showLoading();
