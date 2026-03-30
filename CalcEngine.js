@@ -294,10 +294,11 @@ function calculateNamedCostInfo_(name, bundleContext, stack) {
   if (row) {
     var override = getCostOverrideForRow_(row, bundleContext.overrideMap);
     if (override && override.manualMode) {
+      var overrideTypeName = String(row[COL.NAME] || '').trim();
       result = {
         total: round2_(toNumber_(override.manualTotal, 0)),
         source: 'Ручной расчёт итоговой себестоимости',
-        type: determineType(row, bundleContext.flakonMap),
+        type: (bundleContext.typeOverrides && bundleContext.typeOverrides[overrideTypeName]) || determineType(row, bundleContext.flakonMap),
         specification: '',
         items: []
       };
@@ -312,7 +313,8 @@ function calculateNamedCostInfo_(name, bundleContext, stack) {
       return result;
     }
 
-    var type = determineType(row, bundleContext.flakonMap);
+    var ctxTypeName = String(row[COL.NAME] || '').trim();
+    var type = (bundleContext.typeOverrides && bundleContext.typeOverrides[ctxTypeName]) || determineType(row, bundleContext.flakonMap);
     if (type === 'Наборы') {
       result = calculateBundleCostByName_(String(row[COL.NAME] || name), row, bundleContext, nextStack);
     } else {
@@ -655,6 +657,7 @@ function calculateAll(params, overrideRows) {
   var bundleContext = buildBundleContext_(params || {}, flakonMap, dataObj.rows || []);
   bundleContext.overrideMap = overrideMap;
   var typeOverrides = typeof getTypeOverrides_ === 'function' ? getTypeOverrides_() : {};
+  bundleContext.typeOverrides = typeOverrides;
   var results = [];
 
   for (var i = 0; i < dataObj.rows.length; i++) {

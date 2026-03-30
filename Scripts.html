@@ -1137,6 +1137,31 @@ function collectImportTableEdits_() {
 function runCalculation() {
   clearTimeout(NDS_TAX_TIMER);
 
+  // Flush pending type overrides first
+  var typeUpdates = [];
+  for (var tIdx in TYPE_PENDING) {
+    if (!TYPE_PENDING.hasOwnProperty(tIdx)) continue;
+    typeUpdates.push({ row: parseInt(tIdx, 10), type: TYPE_PENDING[tIdx] });
+  }
+  if (typeUpdates.length) {
+    TYPE_PENDING = {};
+    showLoading();
+    setStatus('cost-status', 'Сохраняю типы товаров и пересчитываю...', 'info');
+    google.script.run
+      .withSuccessHandler(function() {
+        runCalculationAfterTypeFlush_();
+      })
+      .withFailureHandler(function(err) {
+        hideLoading();
+        setStatus('cost-status', 'Ошибка сохранения типов: ' + err.message, 'error');
+      })
+      .updateProductTypes(typeUpdates);
+    return;
+  }
+  runCalculationAfterTypeFlush_();
+}
+
+function runCalculationAfterTypeFlush_() {
   // Collect edits from NDS_TAX_PENDING
   var pendingUpdates = [];
   for (var rowIdx in NDS_TAX_PENDING) {
