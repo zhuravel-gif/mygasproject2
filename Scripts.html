@@ -527,7 +527,25 @@ function applyRatesToAllUI() {
 }
 
 function saveRateEditsUI() {
-  flushNdsTaxUpdates();
+  clearTimeout(NDS_TAX_TIMER);
+  if (Object.keys(NDS_TAX_PENDING).length) {
+    flushNdsTaxUpdates();
+    return;
+  }
+  // Fallback: compare Tabulator state with original data
+  var edits = collectImportTableEdits_();
+  if (!edits.length) {
+    setStatus('export-status', 'Нет несохранённых правок.', 'info');
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function() {
+      setStatus('export-status', '✓ Ручные правки таблицы сохранены (' + edits.length + ' строк)', 'success');
+    })
+    .withFailureHandler(function(err) {
+      setStatus('export-status', 'Ошибка сохранения ручных правок: ' + err.message, 'error');
+    })
+    .updateImportRows(edits);
 }
 
 // ============================================================
@@ -1065,8 +1083,44 @@ STATE.costSort = STATE.costSort || { key: null, dir: 'asc' };
 STATE.costLoaded = STATE.costLoaded || false;
 STATE.costDirty = STATE.costDirty || false;
 
+function collectImportTableEdits_() {
+  if (!STATE.tables.export || !STATE.exportData || !STATE.exportData.rows) return [];
+  var tableRows = STATE.tables.export.getData();
+  var origRows = STATE.exportData.rows;
+  var updates = [];
+  for (var i = 0; i < tableRows.length; i++) {
+    var rowIdx = tableRows[i]._rowIndex;
+    if (rowIdx === undefined || rowIdx === null) continue;
+    var orig = origRows[rowIdx];
+    if (!orig) continue;
+    var curPrice = tableRows[i]['col' + EXPORT_PRICE_COL];
+    var curNds = tableRows[i]['col' + EXPORT_NDS_COL];
+    var curTax = tableRows[i]['col' + EXPORT_TAX_COL];
+    var origPrice = orig[EXPORT_PRICE_COL];
+    var origNds = orig[EXPORT_NDS_COL];
+    var origTax = orig[EXPORT_TAX_COL];
+    var update = null;
+    if (String(curPrice) !== String(origPrice)) {
+      update = update || { row: rowIdx };
+      update.supplierPrice = parseFloat(curPrice) || 0;
+    }
+    if (String(curNds) !== String(origNds)) {
+      update = update || { row: rowIdx };
+      update.nds = parseFloat(curNds) || 0;
+    }
+    if (String(curTax) !== String(origTax)) {
+      update = update || { row: rowIdx };
+      update.tax = parseFloat(curTax) || 0;
+    }
+    if (update) updates.push(update);
+  }
+  return updates;
+}
+
 function runCalculation() {
   clearTimeout(NDS_TAX_TIMER);
+
+  // Collect edits from NDS_TAX_PENDING
   var pendingUpdates = [];
   for (var rowIdx in NDS_TAX_PENDING) {
     if (!NDS_TAX_PENDING.hasOwnProperty(rowIdx)) continue;
@@ -1079,9 +1133,14 @@ function runCalculation() {
   }
   NDS_TAX_PENDING = {};
 
+  // Also collect any Tabulator edits not yet in NDS_TAX_PENDING
+  if (!pendingUpdates.length) {
+    pendingUpdates = collectImportTableEdits_();
+  }
+
   if (pendingUpdates.length) {
     showLoading();
-    setStatus('cost-status', 'Сохраняю правки и пересчитываю...', 'info');
+    setStatus('cost-status', 'Сохраняю правки (' + pendingUpdates.length + ' строк) и пересчитываю...', 'info');
     google.script.run
       .withSuccessHandler(function() {
         runCalculationCore_();

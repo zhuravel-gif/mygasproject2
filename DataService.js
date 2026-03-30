@@ -206,6 +206,7 @@ function updateImportRows(updates) {
     }
   }
 
+  SpreadsheetApp.flush();
   formatDataSheet_(sheet, sheet.getLastRow() - 1);
   applyWarningProtection_(sheet, '1cData — данные импортированы');
 
