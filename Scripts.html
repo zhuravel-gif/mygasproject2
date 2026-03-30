@@ -1598,6 +1598,7 @@ function renderCostTable(results) {
     if (col.key === 'name') {
       colDef.frozen = true;
       colDef.minWidth = 200;
+      colDef.headerFilter = 'input';
       colDef.headerFilterPlaceholder = 'Поиск...';
     } else if (col.key === 'articleWb' || col.key === 'article' || col.key === 'flakonName' || col.key === 'category') {
       colDef.minWidth = 120;
