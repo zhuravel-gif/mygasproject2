@@ -528,24 +528,47 @@ function applyRatesToAllUI() {
 
 function saveRateEditsUI() {
   clearTimeout(NDS_TAX_TIMER);
+  // Flush type changes
+  var typeUpdates = [];
+  for (var tIdx in TYPE_PENDING) {
+    if (!TYPE_PENDING.hasOwnProperty(tIdx)) continue;
+    typeUpdates.push({ row: parseInt(tIdx, 10), type: TYPE_PENDING[tIdx] });
+  }
+  if (typeUpdates.length) {
+    google.script.run
+      .withSuccessHandler(function() {
+        TYPE_PENDING = {};
+      })
+      .withFailureHandler(function(err) {
+        setStatus('export-status', 'Ошибка сохранения типов: ' + err.message, 'error');
+      })
+      .updateProductTypes(typeUpdates);
+  }
+  // Flush NDS/Tax/Price changes
   if (Object.keys(NDS_TAX_PENDING).length) {
     flushNdsTaxUpdates();
+    if (!typeUpdates.length) return;
+    setStatus('export-status', '✓ Правки сохранены', 'success');
     return;
   }
   // Fallback: compare Tabulator state with original data
   var edits = collectImportTableEdits_();
-  if (!edits.length) {
+  if (!edits.length && !typeUpdates.length) {
     setStatus('export-status', 'Нет несохранённых правок.', 'info');
     return;
   }
-  google.script.run
-    .withSuccessHandler(function() {
-      setStatus('export-status', '✓ Ручные правки таблицы сохранены (' + edits.length + ' строк)', 'success');
-    })
-    .withFailureHandler(function(err) {
-      setStatus('export-status', 'Ошибка сохранения ручных правок: ' + err.message, 'error');
-    })
-    .updateImportRows(edits);
+  if (edits.length) {
+    google.script.run
+      .withSuccessHandler(function() {
+        setStatus('export-status', '✓ Ручные правки таблицы сохранены (' + edits.length + ' строк)', 'success');
+      })
+      .withFailureHandler(function(err) {
+        setStatus('export-status', 'Ошибка сохранения ручных правок: ' + err.message, 'error');
+      })
+      .updateImportRows(edits);
+  } else if (typeUpdates.length) {
+    setStatus('export-status', '✓ Типы товаров сохранены (' + typeUpdates.length + ' строк)', 'success');
+  }
 }
 
 // ============================================================
@@ -556,6 +579,7 @@ function saveRateEditsUI() {
 var EXPORT_PRICE_COL = 15;
 var EXPORT_NDS_COL = 16;
 var EXPORT_TAX_COL = 17;
+var TYPE_PENDING = {};
 
 function renderExportTable(data) {
   if (!data || !data.headers) return;
@@ -630,10 +654,13 @@ function renderExportTable(data) {
       colDef.headerFilterPlaceholder = 'Поиск...';
     } else if (c === typeColIndex) {
       colDef.minWidth = 130;
+      colDef.editor = 'list';
+      colDef.editorParams = { values: ['Сырьё', 'Готовый товар', 'Флакон', 'Наборы'] };
       colDef.headerFilter = 'list';
       colDef.headerFilterFunc = '=';
       colDef.headerFilterParams = { valuesLookup: true, sortValuesList: 'asc' };
       colDef.hozAlign = 'left';
+      colDef.cssClass = 'calc-col';
     } else if (c === EXPORT_PRICE_COL) {
       // Editable supplier price column
       colDef.editor = 'number';
@@ -688,11 +715,16 @@ function renderExportTable(data) {
       var rowData = cell.getRow().getData();
       var rowIndex = rowData._rowIndex;
       var colIndex = parseInt(field.replace('col', ''), 10);
-      var fieldName = colIndex === EXPORT_PRICE_COL ? 'supplierPrice' : (colIndex === EXPORT_NDS_COL ? 'nds' : 'tax');
       // Sync change back to STATE.exportData
       if (STATE.exportData && STATE.exportData.rows && STATE.exportData.rows[rowIndex]) {
         STATE.exportData.rows[rowIndex][colIndex] = cell.getValue();
       }
+      var typeCol = STATE.exportData && STATE.exportData.typeColIndex;
+      if (typeof typeCol === 'number' && colIndex === typeCol) {
+        TYPE_PENDING[rowIndex] = cell.getValue();
+        return;
+      }
+      var fieldName = colIndex === EXPORT_PRICE_COL ? 'supplierPrice' : (colIndex === EXPORT_NDS_COL ? 'nds' : 'tax');
       onNdsTaxChange(rowIndex, fieldName, cell.getValue());
     }
   });

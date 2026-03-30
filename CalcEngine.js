@@ -654,10 +654,13 @@ function calculateAll(params, overrideRows) {
   var overrideMap = buildRuntimeCostOverrideMap_(overrideRows);
   var bundleContext = buildBundleContext_(params || {}, flakonMap, dataObj.rows || []);
   bundleContext.overrideMap = overrideMap;
+  var typeOverrides = typeof getTypeOverrides_ === 'function' ? getTypeOverrides_() : {};
   var results = [];
 
   for (var i = 0; i < dataObj.rows.length; i++) {
-    results.push(calculateOne(dataObj.rows[i], params || {}, flakonMap, null, null, bundleContext, {}));
+    var row = dataObj.rows[i];
+    var forcedType = typeOverrides[String(row[COL.NAME] || '').trim()] || null;
+    results.push(calculateOne(row, params || {}, flakonMap, forcedType, null, bundleContext, {}));
   }
 
   saveParams(params || {});

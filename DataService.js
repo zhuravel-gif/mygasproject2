@@ -309,14 +309,49 @@ function getData() {
     flakonMap = buildFlakonMap(getFlakonList());
   }
 
+  var typeOverrides = getTypeOverrides_();
   var enrichedRows = [];
   for (var i = 0; i < raw.rows.length; i++) {
     var row = raw.rows[i].slice();
-    row.push(getDataRowType_(row, flakonMap || {}));
+    var nameKey = String(row[0] || '').trim();
+    var overriddenType = nameKey && typeOverrides[nameKey];
+    row.push(overriddenType || getDataRowType_(row, flakonMap || {}));
     enrichedRows.push(row);
   }
 
   return { headers: headers, rows: enrichedRows, typeColIndex: typeColIndex };
+}
+
+function getTypeOverrides_() {
+  var raw = getMetaValue_('type.overrides');
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch (e) { return {}; }
+}
+
+function updateProductTypes(updates) {
+  if (!updates || !updates.length) {
+    return { success: false, message: 'Нет изменений типа.' };
+  }
+  var raw = getDataRaw_();
+  if (!raw.rows.length) {
+    return { success: false, message: 'Лист 1cData не заполнен.' };
+  }
+  var overrides = getTypeOverrides_();
+  var validTypes = { 'Сырьё': 1, 'Готовый товар': 1, 'Наборы': 1, 'Флакон': 1 };
+  for (var i = 0; i < updates.length; i++) {
+    var rowIdx = Number(updates[i].row);
+    var type = String(updates[i].type || '').trim();
+    if (rowIdx < 0 || rowIdx >= raw.rows.length) continue;
+    var name = String(raw.rows[rowIdx][0] || '').trim();
+    if (!name) continue;
+    if (validTypes[type]) {
+      overrides[name] = type;
+    } else {
+      delete overrides[name];
+    }
+  }
+  setMetaValue_('type.overrides', JSON.stringify(overrides));
+  return { success: true, count: updates.length };
 }
 
 function getDataHeaders() {
