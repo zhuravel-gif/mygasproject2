@@ -542,6 +542,7 @@ function calculateOne(row, params, flakonMap, forcedType, flakonNameOverride, bu
     group3: String(row[COL.GRP3] || '').trim(),
     rawName: String(row[COL.RAW] || '').trim(),
     type: type,
+    supplierPrice: priceVal,
     raw: 0,
     taxDuty: 0,
     delivery: 0,
@@ -892,6 +893,7 @@ function buildCalculationPayload_(row, params, flakonMap, forcedType, flakonName
 }
 
 function calculateManual(input) {
+  _ensureFreshCache();
   input = input || {};
   var row = new Array(COL.TAX + 1).fill('');
   row[COL.NAME] = input.name || 'Ручной расчёт';
@@ -926,6 +928,7 @@ function calculateManual(input) {
 }
 
 function getVerification(index, params) {
+  _ensureFreshCache();
   var dataObj = getDataRaw_();
   if (!dataObj.rows || index < 0 || index >= dataObj.rows.length) {
     return { success: false, message: 'Позиция не найдена.' };

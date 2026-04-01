@@ -42,9 +42,19 @@ var CFG = {
 
 /* ── Execution-scoped sheet read cache ── */
 var _sheetCache = {};
+var _cacheGeneration = 0;
+
+/**
+ * Must be called at the start of every public entry-point function
+ * (any function invoked via google.script.run) to prevent stale data
+ * from GAS V8 warm-start instance reuse.
+ */
+function _ensureFreshCache() {
+  _sheetCache = {};
+}
 
 function _cachedSheetRead(sheetName) {
-  if (_sheetCache[sheetName]) return _sheetCache[sheetName];
+  if (_sheetCache.hasOwnProperty(sheetName)) return _sheetCache[sheetName];
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
   if (!sheet || sheet.getLastRow() < 1) {
@@ -77,6 +87,7 @@ var COST_RESULT_HEADERS = [
   'Товарная группа 2',
   'Товарная группа 3',
   'Основное сырьё',
+  'Цена поставщика',
   'Сырьё',
   'Нал+Пош',
   'Доставка',
@@ -107,22 +118,23 @@ var COST_RESULT_COL = {
   GROUP2: 8,
   GROUP3: 9,
   RAW_NAME: 10,
-  RAW: 11,
-  TAX_DUTY: 12,
-  DELIVERY: 13,
-  RAW_FL: 14,
-  DELIVERY_FL: 15,
-  TAX_DUTY_FL: 16,
-  LABEL: 17,
-  TOTAL_FL: 18,
-  CALC_TOTAL: 19,
-  MANUAL_MODE: 20,
-  MANUAL_TOTAL: 21,
-  TOTAL: 22,
-  COST_1C: 23,
-  DIFF: 24,
-  DIFF_PCT: 25,
-  UPDATED_AT: 26
+  SUPPLIER_PRICE: 11,
+  RAW: 12,
+  TAX_DUTY: 13,
+  DELIVERY: 14,
+  RAW_FL: 15,
+  DELIVERY_FL: 16,
+  TAX_DUTY_FL: 17,
+  LABEL: 18,
+  TOTAL_FL: 19,
+  CALC_TOTAL: 20,
+  MANUAL_MODE: 21,
+  MANUAL_TOTAL: 22,
+  TOTAL: 23,
+  COST_1C: 24,
+  DIFF: 25,
+  DIFF_PCT: 26,
+  UPDATED_AT: 27
 };
 
 var IMPORT_META_KEYS = {
@@ -134,6 +146,7 @@ var IMPORT_META_KEYS = {
 };
 
 function getImportSettings() {
+  _ensureFreshCache();
   var params = getParams();
   return {
     mappings: {
@@ -205,6 +218,7 @@ function importSupplierPriceData(payload) {
 }
 
 function updateImportRows(updates) {
+  _ensureFreshCache();
   if (!updates || updates.length === 0) {
     return { success: false, message: 'Нет изменений для сохранения.' };
   }
@@ -256,6 +270,7 @@ function updateNdsTax(updates) {
 }
 
 function updateAllNdsTax(nds, tax) {
+  _ensureFreshCache();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.DATA);
   if (!sheet || sheet.getLastRow() < 2) {
@@ -329,6 +344,7 @@ function getTypeOverrides_() {
 }
 
 function updateProductTypes(updates) {
+  _ensureFreshCache();
   if (!updates || !updates.length) {
     return { success: false, message: 'Нет изменений типа.' };
   }
@@ -371,6 +387,7 @@ function getDataRowType_(row, flakonMap) {
 }
 
 function getParams() {
+  _ensureFreshCache();
   var cached = _cachedSheetRead(CFG.BASIS);
   if (!cached || cached.length < 2) {
     return {
@@ -403,6 +420,7 @@ function getParams() {
 }
 
 function saveParams(p) {
+  _ensureFreshCache();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.BASIS) || ss.insertSheet(CFG.BASIS);
   sheet.clear();
@@ -427,6 +445,7 @@ function saveParams(p) {
 }
 
 function getFlakonList() {
+  _ensureFreshCache();
   var savedMap = {};
   var params = getParams();
 
@@ -475,11 +494,13 @@ function getFlakonList() {
 }
 
 function recalculateFlakonData(flakons) {
+  _ensureFreshCache();
   var normalized = recalculateFlakonList_(flakons || [], getParams());
   return { success: true, count: normalized.length, flakons: normalized };
 }
 
 function saveFlakonData(flakons) {
+  _ensureFreshCache();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CFG.FLAKONS) || ss.insertSheet(CFG.FLAKONS);
   var normalized = recalculateFlakonList_(flakons || [], getParams());
@@ -589,6 +610,7 @@ function importBundleCompositions(payload) {
 }
 
 function getBundleData() {
+  _ensureFreshCache();
   if (typeof buildBundleUiState_ === 'function') {
     return buildBundleUiState_();
   }
@@ -628,12 +650,14 @@ function getBundleStats() {
 }
 
 function getExportPageData() {
+  _ensureFreshCache();
   var data = getData();
   var stats = getBundleStats();
   return { data: data, bundleStats: stats };
 }
 
 function saveBundleData(payload) {
+  _ensureFreshCache();
   payload = payload || {};
   var existingRows = getStoredBundleRows_();
   if (!existingRows.length) {
@@ -871,6 +895,7 @@ function saveResults(results) {
 
 function getCostState() {
   try {
+    _ensureFreshCache();
     var rows = getStoredCostResults_();
     if (!rows.length) {
       var data = getDataRaw_();
@@ -913,6 +938,7 @@ function recalculateAndStoreCostResults(params) {
 
 function recalculateCostResults(payload) {
   try {
+    _ensureFreshCache();
     payload = payload || {};
     var calc = calculateAll(payload.params || getParams(), payload.currentRows || []);
     if (!calc || !calc.success) return calc || { success: false, message: 'Не удалось пересчитать себестоимость.' };
@@ -930,6 +956,7 @@ function recalculateCostResults(payload) {
 
 function saveCostState(payload) {
   try {
+    _ensureFreshCache();
     payload = payload || {};
     var rows = payload.results || [];
     writeStoredCostResults_(rows, { preserveExistingManuals: false });
@@ -1032,6 +1059,7 @@ function writeStoredCostResults_(results, options) {
       item.group2 || '',
       item.group3 || '',
       item.rawName || '',
+      round2_(toNumber_(item.supplierPrice, 0)),
       round2_(toNumber_(item.raw, 0)),
       round2_(toNumber_(item.taxDuty, 0)),
       round2_(toNumber_(item.delivery, 0)),
@@ -1079,6 +1107,7 @@ function normalizeStoredCostResultRow_(row) {
     group2: String(row[COST_RESULT_COL.GROUP2] || '').trim(),
     group3: String(row[COST_RESULT_COL.GROUP3] || '').trim(),
     rawName: String(row[COST_RESULT_COL.RAW_NAME] || '').trim(),
+    supplierPrice: round2_(toNumber_(row[COST_RESULT_COL.SUPPLIER_PRICE], 0)),
     raw: round2_(toNumber_(row[COST_RESULT_COL.RAW], 0)),
     taxDuty: round2_(toNumber_(row[COST_RESULT_COL.TAX_DUTY], 0)),
     delivery: round2_(toNumber_(row[COST_RESULT_COL.DELIVERY], 0)),
@@ -1124,7 +1153,7 @@ function formatStoredCostSheet_(sheet, rowCount) {
   sheet.setFrozenRows(1);
 
   if (rowCount > 0) {
-    sheet.getRange(2, COST_RESULT_COL.RAW + 1, rowCount, 14).setNumberFormat('#,##0.00');
+    sheet.getRange(2, COST_RESULT_COL.SUPPLIER_PRICE + 1, rowCount, 15).setNumberFormat('#,##0.00');
     sheet.getRange(2, COST_RESULT_COL.DIFF_PCT + 1, rowCount, 1).setNumberFormat('0.0%');
   }
 }
@@ -1155,6 +1184,7 @@ function isCurrentCostResultsSchema_(headers) {
 }
 
 function importNomenclature(data, ndsDefault, taxDefault) {
+  _ensureFreshCache();
   if (!data || data.length < 2) {
     return { success: false, message: 'Файл пустой или в нем нет строк.' };
   }
@@ -1171,12 +1201,14 @@ function importNomenclature(data, ndsDefault, taxDefault) {
 }
 
 function importCost1C(mappedData) {
+  _ensureFreshCache();
   return importCurrentCost({
     rows: mappedData || []
   });
 }
 
 function importSupplierPrice(mappedData) {
+  _ensureFreshCache();
   return importSupplierPriceData({
     rows: mappedData || []
   });

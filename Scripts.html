@@ -528,16 +528,23 @@ function applyRatesToAllUI() {
 
 function saveRateEditsUI() {
   clearTimeout(NDS_TAX_TIMER);
-  // Flush type changes
-  var typeUpdates = [];
-  for (var tIdx in TYPE_PENDING) {
-    if (!TYPE_PENDING.hasOwnProperty(tIdx)) continue;
-    typeUpdates.push({ row: parseInt(tIdx, 10), type: TYPE_PENDING[tIdx] });
+  // Force-close any open Tabulator editor so pending edits are committed
+  if (STATE.tables.export) {
+    try {
+      var el = document.querySelector('#export-table-container .tabulator-editing input, #export-table-container .tabulator-editing select');
+      if (el) el.blur();
+    } catch (e) {}
   }
+  // Collect type changes (TYPE_PENDING + fallback comparison with original snapshot)
+  var typeUpdates = collectTypeUpdates_();
   if (typeUpdates.length) {
     google.script.run
       .withSuccessHandler(function() {
         TYPE_PENDING = {};
+        // Update original snapshot so subsequent saves don't re-send
+        for (var u = 0; u < typeUpdates.length; u++) {
+          STATE.originalTypes[typeUpdates[u].row] = typeUpdates[u].type;
+        }
       })
       .withFailureHandler(function(err) {
         setStatus('export-status', 'Ошибка сохранения типов: ' + err.message, 'error');
@@ -585,6 +592,15 @@ function renderExportTable(data) {
   if (!data || !data.headers) return;
 
   STATE.exportData = data;
+  TYPE_PENDING = {};
+  // Snapshot original type values for fallback change detection
+  var _tc = typeof data.typeColIndex === 'number' ? data.typeColIndex : -1;
+  STATE.originalTypes = {};
+  if (_tc >= 0) {
+    for (var ti = 0; ti < (data.rows || []).length; ti++) {
+      STATE.originalTypes[ti] = data.rows[ti][_tc];
+    }
+  }
 
   if (typeof Tabulator === 'undefined') {
     // Vanilla fallback — render simple table
@@ -1070,6 +1086,7 @@ var COST_COLUMNS = [
   { key: 'flakonName', label: 'Флакон', numeric: false, filterable: false },
   { key: 'category', label: 'Категория', numeric: false, filterable: false },
   { key: 'type', label: 'Тип', numeric: false, filterable: true },
+  { key: 'supplierPrice', label: 'Цена пост.', numeric: true, filterable: true },
   { key: 'raw', label: 'Сырьё', numeric: true, filterable: true },
   { key: 'taxDuty', label: 'Нал+Пош', numeric: true, filterable: true },
   { key: 'delivery', label: 'Доставка', numeric: true, filterable: true },
@@ -1134,17 +1151,44 @@ function collectImportTableEdits_() {
   return updates;
 }
 
-function runCalculation() {
-  clearTimeout(NDS_TAX_TIMER);
-
-  // Flush pending type overrides first
+function collectTypeUpdates_() {
   var typeUpdates = [];
   for (var tIdx in TYPE_PENDING) {
     if (!TYPE_PENDING.hasOwnProperty(tIdx)) continue;
     typeUpdates.push({ row: parseInt(tIdx, 10), type: TYPE_PENDING[tIdx] });
   }
+  // Fallback: detect from Tabulator vs original snapshot
+  if (!typeUpdates.length && STATE.tables.export && STATE.originalTypes && STATE.exportData) {
+    var typeCol = STATE.exportData.typeColIndex;
+    if (typeof typeCol === 'number' && typeCol >= 0) {
+      var tRows = STATE.tables.export.getData();
+      for (var ri = 0; ri < tRows.length; ri++) {
+        var rIdx = tRows[ri]._rowIndex;
+        if (rIdx === undefined || rIdx === null) continue;
+        var curType = tRows[ri]['col' + typeCol];
+        if (STATE.originalTypes.hasOwnProperty(rIdx) && String(curType) !== String(STATE.originalTypes[rIdx])) {
+          typeUpdates.push({ row: rIdx, type: curType });
+          TYPE_PENDING[rIdx] = curType;
+        }
+      }
+    }
+  }
+  return typeUpdates;
+}
+
+function runCalculation() {
+  clearTimeout(NDS_TAX_TIMER);
+
+  // Flush pending type overrides first
+  var typeUpdates = collectTypeUpdates_();
   if (typeUpdates.length) {
     TYPE_PENDING = {};
+    // Update original snapshot
+    if (STATE.originalTypes) {
+      for (var u = 0; u < typeUpdates.length; u++) {
+        STATE.originalTypes[typeUpdates[u].row] = typeUpdates[u].type;
+      }
+    }
     showLoading();
     setStatus('cost-status', 'Сохраняю типы товаров и пересчитываю...', 'info');
     google.script.run

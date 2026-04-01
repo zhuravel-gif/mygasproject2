@@ -247,6 +247,7 @@ function buildPlanSourceSheetInfo_(sheet) {
 }
 
 function getPlanImportSource(url) {
+  _ensureFreshCache();
   var cleanUrl = String(url || '').trim();
   if (!cleanUrl) return planErrorResponse_('Укажите ссылку на Google Sheets.');
 
@@ -266,6 +267,7 @@ function getPlanImportSource(url) {
 
 function importPlanCosts(payload) {
   try {
+    _ensureFreshCache();
     payload = payload || {};
     var config = normalizePlanImportConfig_(payload);
     if (!config.spreadsheetUrl) return planErrorResponse_('Не указана ссылка на Google Sheets.');
@@ -401,6 +403,7 @@ function buildPlanCostState_(includeItems) {
 
 function getPlanCostState() {
   try {
+    _ensureFreshCache();
     return buildPlanCostState_(false);
   } catch (err) {
     return planErrorResponse_('Не удалось загрузить состояние плана: ' + err.message, err);
@@ -409,6 +412,7 @@ function getPlanCostState() {
 
 function calculatePlanCosts(monthKey) {
   try {
+    _ensureFreshCache();
     var state = buildPlanCostState_(true);
     if (!state || !state.success) {
       return planErrorResponse_(
